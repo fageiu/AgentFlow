@@ -22,6 +22,7 @@ app.get<{ Querystring: { task?: string } }>("/agent/run/stream", async (request,
     return reply.code(400).send({ message: "Missing task query parameter." });
   }
 
+  // 接管原始响应流，Fastify 后续不会再自动序列化返回值，适合手写 SSE。
   reply.hijack();
   reply.raw.writeHead(200, {
     "Access-Control-Allow-Origin": "*",
@@ -32,11 +33,13 @@ app.get<{ Querystring: { task?: string } }>("/agent/run/stream", async (request,
   });
 
   const writeEvent = (event: AgentRunEvent) => {
+    // SSE 格式要求每条消息以空行结尾；event 是前端 addEventListener 使用的事件名。
     reply.raw.write(`event: ${event.kind}\n`);
     reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
   };
 
   try {
+    // 执行器是 async generator，每 yield 一次就立即推给浏览器。
     for await (const event of streamAgentTask(task)) {
       writeEvent(event);
     }

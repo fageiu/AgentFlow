@@ -10,6 +10,7 @@ function wait(ms: number) {
 }
 
 function buildDemoSteps(): AgentStep[] {
+  // 当前阶段先用固定工单跑通完整链路，后续可以替换成真实 LLM 规划和工具选择。
   const ticket = getTicket("T-1001");
   const customer = getCustomer(ticket.customerId);
   const policy = searchPolicy("refund");
@@ -85,6 +86,7 @@ export async function runAgentTask(task: string): Promise<AgentRun> {
 export async function* streamAgentTask(task: string): AsyncGenerator<AgentRunEvent> {
   const run = createRun(task, "running");
 
+  // 第一条事件先告诉前端 runId 和初始状态，方便 UI 进入“执行中”。
   yield {
     kind: "run_started",
     run,
@@ -93,6 +95,7 @@ export async function* streamAgentTask(task: string): AsyncGenerator<AgentRunEve
   for (const step of buildDemoSteps()) {
     await wait(STEP_DELAY_MS);
     run.steps.push(step);
+    // 每个步骤独立 yield，浏览器会即时追加时间线，而不是等全部完成后一次性渲染。
     yield {
       kind: "step",
       step,
@@ -101,6 +104,7 @@ export async function* streamAgentTask(task: string): AsyncGenerator<AgentRunEve
 
   run.status = "completed";
 
+  // 最后一条事件携带完整 run 快照，前端用它校准最终状态。
   yield {
     kind: "run_completed",
     run,

@@ -37,6 +37,7 @@ function readEvent(event: Event): AgentRunEvent | undefined {
     return undefined
   }
 
+  // SSE 的 data 字段是后端 JSON.stringify 后的事件载荷，这里统一还原成共享事件类型。
   return JSON.parse(message.data) as AgentRunEvent
 }
 
@@ -55,6 +56,7 @@ function applyRunEvent(event: Event) {
   }
 
   if (payload.kind === 'step') {
+    // 每收到一个 step，就追加一张时间线卡片；不要覆盖已有步骤。
     steps.value = [...steps.value, payload.step]
     return
   }
@@ -85,10 +87,12 @@ function runTask() {
   errorMessage.value = ''
   status.value = 'running'
 
+  // EventSource 只能发 GET 请求，所以任务内容通过 query string 传给后端 SSE 接口。
   const url = new URL('http://127.0.0.1:3001/agent/run/stream')
   url.searchParams.set('task', nextTask)
   eventSource = new EventSource(url)
 
+  // 后端按事件名推送 run_started / step / run_completed，前端分别监听并更新状态。
   eventSource.addEventListener('run_started', applyRunEvent)
   eventSource.addEventListener('step', applyRunEvent)
   eventSource.addEventListener('run_completed', applyRunEvent)

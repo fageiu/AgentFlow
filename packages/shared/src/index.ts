@@ -17,6 +17,7 @@ export interface AgentRun {
   steps: AgentStep[];
 }
 
+// 前后端共享同一组 SSE 事件类型，避免事件名和 payload 结构各写一套。
 export type AgentRunEvent =
   | {
       kind: "run_started";
