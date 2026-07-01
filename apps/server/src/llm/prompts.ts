@@ -1,4 +1,4 @@
-import type { FinalPromptInput } from "./types.js";
+import type { FinalPromptInput, LlmChatMessage } from "./types.js";
 
 /** 构建计划生成 Prompt，让 LLM 只规划步骤，不编造工具结果。 */
 export function buildPlanPrompt(task: string) {
@@ -9,7 +9,26 @@ export function buildPlanPrompt(task: string) {
   };
 }
 
-/** 构建最终结论 Prompt，把后端工具结果交给 LLM 生成面向业务的处理报告。 */
+/** 构建 Tool Calling 的初始消息，要求模型用工具读取事实并执行必要业务动作。 */
+export function buildToolCallingMessages(task: string): LlmChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: [
+        "你是企业客服流程 Agent，必须通过可用工具读取真实业务数据，不要凭空编造工单、客户、订单或规则信息。",
+        "如果任务涉及退款，请先读取工单，再按工单中的 customerId/orderId 查询客户和订单，并检索 refund 规则。",
+        "当证据足够且需要变更业务状态时，可以调用 createRefund 和 updateTicketStatus。",
+        "完成所有必要工具调用后，用中文给出简洁最终结论，说明判断依据、已执行动作、风险和下一步。",
+      ].join("\n"),
+    },
+    {
+      role: "user",
+      content: `用户任务：${task}`,
+    },
+  ];
+}
+
+/** 构建最终结论 Prompt，保留给非 Tool Calling 的兼容场景和后续评测脚本。 */
 export function buildFinalPrompt(input: FinalPromptInput) {
   return {
     system:
@@ -18,7 +37,10 @@ export function buildFinalPrompt(input: FinalPromptInput) {
       `用户任务：${input.task}`,
       `工单信息：${JSON.stringify(input.ticket, null, 2)}`,
       `客户信息：${JSON.stringify(input.customer, null, 2)}`,
+      `订单信息：${JSON.stringify(input.order, null, 2)}`,
       `规则信息：${JSON.stringify(input.policy, null, 2)}`,
+      `退款记录：${JSON.stringify(input.refund ?? null, null, 2)}`,
+      `工单状态变更：${JSON.stringify(input.ticketStatusUpdate ?? null, null, 2)}`,
     ].join("\n\n"),
   };
 }

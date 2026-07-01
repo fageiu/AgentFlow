@@ -1,9 +1,12 @@
-import type { AgentRun, AgentRunEvent, AgentStep } from "@agentflow/shared";
-import { generateText } from "../llm/provider.js";
-import { buildFinalPrompt, buildPlanPrompt } from "../llm/prompts.js";
-import { getCustomer, getTicket, searchPolicy } from "../tools/sandboxTools.js";
+import type { AgentRun, AgentRunEvent, AgentStep, AgentStepType } from "@agentflow/shared";
+import { generateChat, generateText } from "../llm/provider.js";
+import { buildPlanPrompt, buildToolCallingMessages } from "../llm/prompts.js";
+import type { LlmChatMessage, LlmToolCall } from "../llm/types.js";
+import { saveRun } from "../trace/runStore.js";
+import { isAgentToolName, listAgentTools, runTool, type ToolName } from "../tools/toolRegistry.js";
 
 const STEP_DELAY_MS = 250;
+const MAX_TOOL_LOOP_TURNS = 10;
 
 /** 在 Demo 中制造轻微延迟，让前端能看到时间线逐步出现。 */
 function wait(ms: number) {
@@ -12,13 +15,14 @@ function wait(ms: number) {
   });
 }
 
-/** 创建一次 Agent 运行记录，后续 step 会不断追加到这条 run 上。 */
+/** 创建一次 Agent 运行记录，后续 step 会不断追加到这条 run 中。 */
 function createRun(task: string, status: AgentRun["status"], steps: AgentStep[] = []): AgentRun {
   return {
     id: `run-${Date.now()}`,
     task,
     status,
     steps,
+    createdAt: new Date().toISOString(),
   };
 }
 
@@ -34,7 +38,7 @@ function createStep(input: Omit<AgentStep, "id" | "status"> & { index: number })
 }
 
 /** 执行一步异步操作并记录耗时，用于前端展示 LLM 或工具调用成本。 */
-async function measureStep<T>(action: () => Promise<T>) {
+async function measureStep<T>(action: () => T | Promise<T>) {
   const startedAt = Date.now();
   const value = await action();
 
@@ -44,13 +48,68 @@ async function measureStep<T>(action: () => Promise<T>) {
   };
 }
 
-/**
- * 构建当前 Demo 的完整执行步骤。
- * 第一版先让 LLM 负责生成计划和最终结论，工具调用仍由后端固定编排。
- */
-async function buildAgentSteps(task: string): Promise<AgentStep[]> {
-  const steps: AgentStep[] = [];
+/** 将工具调用的输入、输出、风险等级和 callId 整理成 trace 详情。 */
+function formatToolDetail(input: unknown, output: unknown, riskLevel: string, toolCallId: string) {
+  return JSON.stringify(
+    {
+      toolCallId,
+      riskLevel,
+      input,
+      output,
+    },
+    null,
+    2,
+  );
+}
 
+function getToolStepType(name: ToolName): AgentStepType {
+  return name === "createRefund" ? "approval" : "tool_call";
+}
+
+function getToolStepTitle(name: ToolName) {
+  const titles: Partial<Record<ToolName, string>> = {
+    getTicket: "LLM 调用工具：查询工单",
+    getCustomer: "LLM 调用工具：查询客户",
+    getOrder: "LLM 调用工具：查询订单",
+    searchPolicy: "LLM 调用工具：检索规则",
+    createRefund: "LLM 调用工具：创建待审批退款",
+    updateTicketStatus: "LLM 调用工具：更新工单状态",
+  };
+
+  return titles[name] ?? `LLM 调用工具：${name}`;
+}
+
+/** 通过工具注册表执行模型请求的工具，并把结果包装成时间线 step。 */
+async function buildToolStep(index: number, toolCall: LlmToolCall) {
+  const toolName = toolCall.name;
+
+  if (!isAgentToolName(toolName)) {
+    throw new Error(`Tool is not available to agent: ${toolName}`);
+  }
+
+  const measured = await measureStep(() => runTool(toolName, toolCall.arguments));
+
+  return {
+    output: measured.value.output,
+    toolMessage: {
+      role: "tool",
+      toolCallId: toolCall.id,
+      name: measured.value.tool.name,
+      content: JSON.stringify(measured.value.output),
+    } satisfies LlmChatMessage,
+    step: createStep({
+      index,
+      type: getToolStepType(toolName),
+      title: getToolStepTitle(toolName),
+      detail: formatToolDetail(measured.value.input, measured.value.output, measured.value.tool.riskLevel, toolCall.id),
+      durationMs: measured.durationMs,
+      toolName: measured.value.tool.name,
+    }),
+  };
+}
+
+/** 生成计划 step，作为 Tool Calling 之前的可观测决策入口。 */
+async function buildPlanStep(task: string, index: number) {
   const planPrompt = buildPlanPrompt(task);
   const plan = await measureStep(() =>
     generateText({
@@ -59,123 +118,127 @@ async function buildAgentSteps(task: string): Promise<AgentStep[]> {
     }),
   );
 
-  steps.push(
-    createStep({
-      index: steps.length + 1,
-      type: "plan",
-      title: plan.value.isMock ? "生成处理计划（Mock LLM）" : "生成处理计划",
-      detail: plan.value.text,
-      durationMs: plan.durationMs,
-      toolName: plan.value.model,
-    }),
-  );
-
-  const ticket = getTicket("T-1001");
-  steps.push(
-    createStep({
-      index: steps.length + 1,
-      type: "tool_call",
-      title: "查询工单",
-      detail: JSON.stringify(ticket, null, 2),
-      durationMs: 42,
-      toolName: "getTicket",
-    }),
-  );
-
-  const customer = getCustomer(ticket.customerId);
-  steps.push(
-    createStep({
-      index: steps.length + 1,
-      type: "tool_call",
-      title: "查询客户",
-      detail: JSON.stringify(customer, null, 2),
-      durationMs: 38,
-      toolName: "getCustomer",
-    }),
-  );
-
-  const policy = searchPolicy("refund");
-  steps.push(
-    createStep({
-      index: steps.length + 1,
-      type: "observation",
-      title: "检索退款规则",
-      detail: policy.content,
-      durationMs: 55,
-      toolName: "searchPolicy",
-    }),
-  );
-
-  steps.push(
-    createStep({
-      index: steps.length + 1,
-      type: "approval",
-      title: "识别高风险操作",
-      detail: "客户为 VIP，且退款动作会改变业务状态。当前版本先把该动作标记为需要人工审批，后续会接入 Human-in-the-loop。",
-      durationMs: 24,
-    }),
-  );
-
-  const finalPrompt = buildFinalPrompt({
-    task,
-    ticket,
-    customer,
-    policy,
+  return createStep({
+    index,
+    type: "plan",
+    title: plan.value.isMock ? "生成处理计划（Mock LLM）" : "生成处理计划",
+    detail: plan.value.text,
+    durationMs: plan.durationMs,
+    toolName: plan.value.model,
   });
-  const final = await measureStep(() =>
-    generateText({
-      ...finalPrompt,
-      temperature: 0.2,
-    }),
-  );
+}
 
-  steps.push(
-    createStep({
-      index: steps.length + 1,
-      type: "final",
-      title: final.value.isMock ? "生成处理结论（Mock LLM）" : "生成处理结论",
-      detail: final.value.text,
-      durationMs: final.durationMs,
-      toolName: final.value.model,
-    }),
-  );
+/** Tool Calling 执行循环：模型选择工具，后端执行，再把 tool result 回传模型。 */
+async function* buildAgentSteps(task: string): AsyncGenerator<AgentStep> {
+  let stepIndex = 1;
+  yield await buildPlanStep(task, stepIndex++);
+
+  const tools = listAgentTools();
+  const messages = buildToolCallingMessages(task);
+
+  for (let turn = 1; turn <= MAX_TOOL_LOOP_TURNS; turn += 1) {
+    const assistant = await measureStep(() =>
+      generateChat({
+        messages,
+        tools,
+        temperature: 0.2,
+      }),
+    );
+    const toolCalls = assistant.value.message.toolCalls ?? [];
+
+    messages.push({
+      role: "assistant",
+      content: assistant.value.message.content,
+      toolCalls,
+    });
+
+    if (toolCalls.length > 0) {
+      for (const toolCall of toolCalls) {
+        const toolStep = await buildToolStep(stepIndex++, toolCall);
+        messages.push(toolStep.toolMessage);
+        yield toolStep.step;
+      }
+
+      continue;
+    }
+
+    if (assistant.value.message.content) {
+      yield createStep({
+        index: stepIndex++,
+        type: "final",
+        title: assistant.value.isMock ? "生成处理结论（Mock LLM）" : "生成处理结论",
+        detail: assistant.value.message.content,
+        durationMs: assistant.durationMs,
+        toolName: assistant.value.model,
+      });
+      return;
+    }
+
+    throw new Error("LLM returned neither tool calls nor final content.");
+  }
+
+  throw new Error(`LLM tool calling loop exceeded ${MAX_TOOL_LOOP_TURNS} turns.`);
+}
+
+async function collectAgentSteps(task: string) {
+  const steps: AgentStep[] = [];
+
+  for await (const step of buildAgentSteps(task)) {
+    steps.push(step);
+  }
 
   return steps;
 }
 
 /** 一次性执行 Agent 任务，返回完整 run，主要用于非流式接口和测试。 */
 export async function runAgentTask(task: string): Promise<AgentRun> {
-  return createRun(task, "completed", await buildAgentSteps(task));
+  const run = createRun(task, "running");
+
+  try {
+    run.steps = await collectAgentSteps(task);
+    run.status = "completed";
+    run.completedAt = new Date().toISOString();
+    saveRun(run);
+    return run;
+  } catch (error) {
+    run.status = "failed";
+    run.completedAt = new Date().toISOString();
+    saveRun(run);
+    throw error;
+  }
 }
 
-/**
- * 流式执行 Agent 任务。
- * 通过 async generator 逐步 yield 事件，后端 SSE 路由会把这些事件实时写给前端。
- */
+/** 流式执行 Agent 任务，SSE 路由会把每个事件实时写给前端。 */
 export async function* streamAgentTask(task: string): AsyncGenerator<AgentRunEvent> {
   const run = createRun(task, "running");
 
-  // 第一条事件先让前端拿到 runId，后续 step 事件可以持续追加到同一次运行中。
   yield {
     kind: "run_started",
     run,
   };
 
-  for (const step of await buildAgentSteps(task)) {
-    await wait(STEP_DELAY_MS);
-    run.steps.push(step);
-    // 每个步骤独立推送，前端可以实时渲染时间线，而不是等待整个任务完成。
+  try {
+    for await (const step of buildAgentSteps(task)) {
+      await wait(STEP_DELAY_MS);
+      run.steps.push(step);
+      yield {
+        kind: "step",
+        step,
+      };
+    }
+
+    run.status = "completed";
+    run.completedAt = new Date().toISOString();
+    saveRun(run);
+
     yield {
-      kind: "step",
-      step,
+      kind: "run_completed",
+      run,
     };
+  } catch (error) {
+    run.status = "failed";
+    run.completedAt = new Date().toISOString();
+    saveRun(run);
+    throw error;
   }
-
-  run.status = "completed";
-
-  // 最终快照用于前端校准状态，避免中途遗漏事件导致 UI 和后端结果不一致。
-  yield {
-    kind: "run_completed",
-    run,
-  };
 }

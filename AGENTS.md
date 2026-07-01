@@ -16,6 +16,8 @@
 - `apps/server/src/main.ts`：Fastify 路由、SSE 响应流。
 - `apps/server/src/agent/executor.ts`：Agent 执行流程、步骤事件生成。
 - `apps/server/src/llm/*`：LLM 配置、Prompt 和 Provider 封装。
+- `apps/server/src/trace/runStore.ts`：AgentRun trace 历史的内存存储与摘要查询。
+- `apps/server/src/tools/toolRegistry.ts`：业务工具注册、参数校验、风险等级描述。
 - `packages/shared/src/index.ts`：前后端共享类型和事件契约。
 
 ## LLM 接入约定
@@ -24,3 +26,18 @@
 - 真实模型调用统一放在 `apps/server/src/llm/provider.ts`。
 - Prompt 模板统一放在 `apps/server/src/llm/prompts.ts`，避免散落在执行器里。
 - 没有 API Key 时必须保持 Mock fallback，保证本地 Demo 可运行。
+- Tool Calling 消息统一使用 `apps/server/src/llm/types.ts` 中的内部类型，再由 provider 转换为 OpenAI-compatible 请求格式。
+
+## Tool Registry 约定
+
+- 新增业务工具时，先在 `sandboxTools.ts` 中实现业务函数，再在 `toolRegistry.ts` 中注册工具。
+- 每个工具必须声明 `name`、`description`、`riskLevel`、`inputSchema`、`jsonSchema` 和 `execute`。
+- `inputSchema` 用于后端 Zod 校验，`jsonSchema` 用于暴露给 LLM Tool Calling。
+- executor 不直接调用业务函数，统一通过 `runTool()` 执行，保证 trace、参数校验和风险等级可复用。
+- 只有 `listAgentTools()` 返回的工具会交给 LLM 自主调用；演示控制类工具例如 `resetSandboxState` 不应暴露给模型。
+
+## Trace 历史约定
+
+- `executor.ts` 负责在运行完成后保存最终 `AgentRun` 快照，不在路由层拼装 trace。
+- `runStore.ts` 当前只做进程内存存储，后续替换数据库时应保持 `saveRun()`、`getRun()`、`listRuns()`、`clearRuns()` 的调用语义稳定。
+- 历史列表接口只返回 `AgentRunSummary`，完整步骤明细通过单条详情接口按需读取。

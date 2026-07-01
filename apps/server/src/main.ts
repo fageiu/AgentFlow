@@ -3,6 +3,8 @@ import Fastify from "fastify";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AgentRunEvent } from "@agentflow/shared";
 import { runAgentTask, streamAgentTask } from "./agent/executor.js";
+import { clearRuns, getRun, listRuns } from "./trace/runStore.js";
+import { getSandboxState, resetSandboxState } from "./tools/sandboxTools.js";
 
 /** 普通执行接口的请求体，主要用于非流式调试。 */
 interface RunAgentBody {
@@ -14,6 +16,11 @@ interface StreamAgentQuery {
   task?: string;
 }
 
+/** 历史 trace 明细接口的路径参数。 */
+interface RunHistoryParams {
+  runId: string;
+}
+
 const app = Fastify({ logger: true });
 
 await app.register(cors, {
@@ -22,6 +29,35 @@ await app.register(cors, {
 
 /** 健康检查接口，用于确认后端服务是否已经启动。 */
 app.get("/health", async () => ({ ok: true }));
+
+/** 沙箱状态接口，前端用它展示 Agent 工具调用后的业务状态变化。 */
+app.get("/sandbox/state", async () => getSandboxState());
+
+/** 沙箱重置接口，用于反复演示时恢复初始工单、订单和退款状态。 */
+app.post("/sandbox/reset", async () => resetSandboxState());
+
+/** 运行历史摘要接口，前端侧边栏用它展示最近执行过的 trace。 */
+app.get("/agent/runs", async () => listRuns());
+
+/** 单条运行历史明细接口，点击历史记录时恢复完整执行时间线。 */
+async function handleGetAgentRun(
+  request: FastifyRequest<{ Params: RunHistoryParams }>,
+  reply: FastifyReply,
+) {
+  const run = getRun(request.params.runId);
+
+  if (!run) {
+    return reply.code(404).send({ message: "Agent run not found." });
+  }
+
+  return run;
+}
+
+/** 清空当前进程内的运行历史，方便本地演示时重新开始。 */
+async function handleClearAgentRuns() {
+  clearRuns();
+  return { ok: true };
+}
 
 /**
  * 非流式 Agent 执行接口。
@@ -81,5 +117,7 @@ async function handleRunAgentStream(
 
 app.post<{ Body: RunAgentBody }>("/agent/run", handleRunAgent);
 app.get<{ Querystring: StreamAgentQuery }>("/agent/run/stream", handleRunAgentStream);
+app.get<{ Params: RunHistoryParams }>("/agent/runs/:runId", handleGetAgentRun);
+app.delete("/agent/runs", handleClearAgentRuns);
 
 await app.listen({ host: "127.0.0.1", port: 3001 });

@@ -1,11 +1,28 @@
 import { getLlmConfig } from "./config.js";
-import type { GenerateTextInput, GenerateTextResult } from "./types.js";
+import type {
+  GenerateChatInput,
+  GenerateChatResult,
+  GenerateTextInput,
+  GenerateTextResult,
+  LlmChatMessage,
+  LlmToolCall,
+  LlmToolDefinition,
+} from "./types.js";
+
+interface OpenAiToolCall {
+  id?: string;
+  function?: {
+    name?: string;
+    arguments?: string;
+  };
+}
 
 /** OpenAI-compatible chat completions 的最小响应结构，只保留当前用到的字段。 */
 interface ChatCompletionResponse {
   choices?: Array<{
     message?: {
-      content?: string;
+      content?: string | null;
+      tool_calls?: OpenAiToolCall[];
     };
   }>;
 }
@@ -13,14 +30,20 @@ interface ChatCompletionResponse {
 /** 生成 Mock 文本，保证没有 API Key 时项目仍可完整演示。 */
 function buildMockText(input: GenerateTextInput) {
   if (input.system.includes("执行计划")) {
-    return "1. 读取工单信息，确认客户、订单和诉求。\n2. 查询客户等级与风险信息。\n3. 检索退款规则，判断是否满足条件。\n4. 若涉及退款或状态变更，标记为需要人工审批。\n5. 汇总依据并生成处理结论。";
+    return [
+      "1. 读取工单信息，确认客户、订单和诉求。",
+      "2. 查询客户等级与风险信息。",
+      "3. 检索退款规则，判断是否满足条件。",
+      "4. 涉及退款或状态变更时调用后端工具落库。",
+      "5. 汇总依据并生成处理结论。",
+    ].join("\n");
   }
 
-  return "根据当前工单、客户和规则信息，该客户为 VIP，退款动作会改变业务状态，建议进入人工审批后再创建退款单，并将工单状态更新为 waiting_approval。";
+  return "根据当前工单、客户、订单和规则信息，该客户为 VIP，退款动作会改变业务状态，已创建待审批退款记录，并将工单状态更新为 waiting_approval。";
 }
 
 /** 将 Mock 文本包装成统一的 GenerateTextResult，方便 executor 无差别消费。 */
-function createMockResult(input: GenerateTextInput, model = "mock-llm"): GenerateTextResult {
+function createMockTextResult(input: GenerateTextInput, model = "mock-llm"): GenerateTextResult {
   return {
     text: buildMockText(input),
     provider: "mock",
@@ -29,15 +52,189 @@ function createMockResult(input: GenerateTextInput, model = "mock-llm"): Generat
   };
 }
 
-/**
- * 统一的文本生成入口。
- * 当前支持 OpenAI-compatible HTTP API；配置缺失或请求失败时可降级为 Mock。
- */
+function createMockToolCall(name: string, args: Record<string, unknown>): LlmToolCall {
+  return {
+    id: `mock-call-${name}`,
+    name,
+    arguments: args,
+  };
+}
+
+function parseToolOutput(messages: LlmChatMessage[], name: string): Record<string, unknown> | undefined {
+  const message = [...messages].reverse().find((item) => item.role === "tool" && item.name === name);
+
+  if (!message || message.role !== "tool") {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(message.content) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+function hasToolOutput(messages: LlmChatMessage[], name: string) {
+  return messages.some((item) => item.role === "tool" && item.name === name);
+}
+
+function extractTicketIdFromMessages(messages: LlmChatMessage[]) {
+  const userMessage = [...messages].reverse().find((item) => item.role === "user");
+
+  if (!userMessage || userMessage.role !== "user") {
+    return "T-1001";
+  }
+
+  return userMessage.content.match(/T-\d+/i)?.[0].toUpperCase() ?? "T-1001";
+}
+
+/** Mock Tool Calling 会读取上一轮工具输出，模拟模型逐步决定下一次工具调用。 */
+function buildMockChatMessage(input: GenerateChatInput, errorMessage?: string): GenerateChatResult["message"] {
+  const requestedTicketId = extractTicketIdFromMessages(input.messages);
+  const ticket = parseToolOutput(input.messages, "getTicket");
+  const order = parseToolOutput(input.messages, "getOrder");
+
+  if (!hasToolOutput(input.messages, "getTicket")) {
+    return { toolCalls: [createMockToolCall("getTicket", { ticketId: requestedTicketId })] };
+  }
+
+  if (!hasToolOutput(input.messages, "getCustomer")) {
+    return { toolCalls: [createMockToolCall("getCustomer", { customerId: ticket?.customerId ?? "C-9001" })] };
+  }
+
+  if (!hasToolOutput(input.messages, "getOrder")) {
+    return { toolCalls: [createMockToolCall("getOrder", { orderId: ticket?.orderId ?? "O-7001" })] };
+  }
+
+  if (!hasToolOutput(input.messages, "searchPolicy")) {
+    return { toolCalls: [createMockToolCall("searchPolicy", { keyword: "refund" })] };
+  }
+
+  if (!hasToolOutput(input.messages, "createRefund")) {
+    return {
+      toolCalls: [
+        createMockToolCall("createRefund", {
+          orderId: order?.id ?? "O-7001",
+          amount: order?.amount ?? 0,
+          reason: "VIP 客户在退款规则范围内申请退款，先创建待审批退款记录。",
+        }),
+      ],
+    };
+  }
+
+  if (!hasToolOutput(input.messages, "updateTicketStatus")) {
+    return {
+      toolCalls: [
+        createMockToolCall("updateTicketStatus", {
+          ticketId: ticket?.id ?? "T-1001",
+          status: "waiting_approval",
+        }),
+      ],
+    };
+  }
+
+  return {
+    content: [
+      "已完成工具调用链路：读取工单、客户、订单和退款规则后，创建了待审批退款记录，并把工单状态更新为 waiting_approval。",
+      "结论：该请求满足进入退款处理流程的条件，但退款属于高风险业务动作，后续应接入人工审批后再最终确认。",
+      errorMessage ? `[Mock fallback: ${errorMessage}]` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  };
+}
+
+function createMockChatResult(input: GenerateChatInput, model = "mock-llm", errorMessage?: string): GenerateChatResult {
+  return {
+    message: buildMockChatMessage(input, errorMessage),
+    provider: "mock",
+    model,
+    isMock: true,
+  };
+}
+
+function toOpenAiTool(tool: LlmToolDefinition) {
+  return {
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    },
+  };
+}
+
+function toOpenAiMessage(message: LlmChatMessage) {
+  if (message.role === "assistant") {
+    return {
+      role: "assistant",
+      content: message.content ?? null,
+      tool_calls: message.toolCalls?.map((toolCall) => ({
+        id: toolCall.id,
+        type: "function",
+        function: {
+          name: toolCall.name,
+          arguments: JSON.stringify(toolCall.arguments),
+        },
+      })),
+    };
+  }
+
+  if (message.role === "tool") {
+    return {
+      role: "tool",
+      tool_call_id: message.toolCallId,
+      name: message.name,
+      content: message.content,
+    };
+  }
+
+  return message;
+}
+
+function parseToolCallArguments(raw: string | undefined) {
+  if (!raw) {
+    return {};
+  }
+
+  const parsed = JSON.parse(raw) as unknown;
+  if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("LLM tool call arguments must be a JSON object.");
+  }
+
+  return parsed as Record<string, unknown>;
+}
+
+function parseAssistantMessage(data: ChatCompletionResponse): GenerateChatResult["message"] {
+  const message = data.choices?.[0]?.message;
+
+  if (!message) {
+    throw new Error("LLM response does not contain assistant message.");
+  }
+
+  return {
+    content: message.content?.trim() || undefined,
+    toolCalls: message.tool_calls?.map((toolCall, index) => {
+      const name = toolCall.function?.name;
+      if (!name) {
+        throw new Error("LLM tool call does not contain function name.");
+      }
+
+      return {
+        id: toolCall.id ?? `tool-call-${index + 1}`,
+        name,
+        arguments: parseToolCallArguments(toolCall.function?.arguments),
+      };
+    }),
+  };
+}
+
+/** 统一的文本生成入口，当前用于计划和兼容旧的最终总结。 */
 export async function generateText(input: GenerateTextInput): Promise<GenerateTextResult> {
   const config = getLlmConfig();
 
   if (config.mock || !config.apiKey || config.provider === "mock") {
-    return createMockResult(input);
+    return createMockTextResult(input);
   }
 
   try {
@@ -79,12 +276,57 @@ export async function generateText(input: GenerateTextInput): Promise<GenerateTe
       throw error;
     }
 
-    // 保持 Demo 可运行：真实 LLM 暂时不可用时降级为 Mock，同时在输出中暴露原因。
-    const result = createMockResult(input, `${config.model} -> mock-fallback`);
+    const result = createMockTextResult(input, `${config.model} -> mock-fallback`);
     const message = error instanceof Error ? error.message : "unknown LLM error";
     return {
       ...result,
       text: `${result.text}\n\n[Mock fallback: ${message}]`,
     };
+  }
+}
+
+/** 支持 Tool Calling 的统一 chat 入口，executor 只消费标准化后的 toolCalls。 */
+export async function generateChat(input: GenerateChatInput): Promise<GenerateChatResult> {
+  const config = getLlmConfig();
+
+  if (config.mock || !config.apiKey || config.provider === "mock") {
+    return createMockChatResult(input);
+  }
+
+  try {
+    const response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: input.messages.map(toOpenAiMessage),
+        tools: input.tools?.map(toOpenAiTool),
+        tool_choice: input.tools?.length ? "auto" : undefined,
+        temperature: input.temperature ?? 0.2,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`LLM request failed: ${response.status} ${await response.text()}`);
+    }
+
+    const data = (await response.json()) as ChatCompletionResponse;
+
+    return {
+      message: parseAssistantMessage(data),
+      provider: "openai-compatible",
+      model: config.model,
+      isMock: false,
+    };
+  } catch (error) {
+    if (!config.fallbackOnError) {
+      throw error;
+    }
+
+    const message = error instanceof Error ? error.message : "unknown LLM error";
+    return createMockChatResult(input, `${config.model} -> mock-fallback`, message);
   }
 }
