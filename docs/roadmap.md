@@ -36,3 +36,11 @@
 - SSE events for `approval_required` and `approval_resolved`.
 - Frontend approval card with approve/reject actions.
 - Approval decision is returned to the LLM so execution can continue or produce a rejection-aware final answer.
+
+## Week 7
+
+- Conversation workspace UI.
+- Single-session multi-turn message stream.
+- Each user message starts one Agent run.
+- Agent run trace is embedded under the corresponding assistant message.
+- Run history remains as an audit and restore entry.

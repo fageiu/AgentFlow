@@ -12,6 +12,12 @@ body {
   margin: 0;
 }
 
+html,
+body,
+#app {
+  height: 100%;
+}
+
 button,
 textarea {
   font: inherit;
@@ -19,9 +25,12 @@ textarea {
 
 .shell {
   display: grid;
-  grid-template-columns: minmax(300px, 420px) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 300px) minmax(340px, 1fr) minmax(240px, 340px);
+  align-items: start;
   gap: 24px;
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
   padding: 28px;
 }
 
@@ -39,6 +48,12 @@ textarea {
   flex-direction: column;
   gap: 18px;
   align-self: start;
+  position: sticky;
+  top: 28px;
+  height: calc(100vh - 56px);
+  max-height: calc(100vh - 56px);
+  min-height: 0;
+  overflow: auto;
   padding: 24px;
 }
 
@@ -259,18 +274,29 @@ button:disabled {
 
 .workspace {
   min-width: 0;
+  min-height: 0;
   padding: 24px;
 }
 
-.content-stack {
+.conversation-workspace {
   display: grid;
-  min-width: 0;
-  gap: 18px;
-  align-content: start;
+  grid-template-rows: auto minmax(360px, 1fr) auto;
+  height: calc(100vh - 56px);
+  min-height: 0;
+}
+
+.content-stack {
+  display: contents;
 }
 
 .state-panel {
   min-width: 0;
+  position: sticky;
+  top: 28px;
+  height: calc(100vh - 56px);
+  max-height: calc(100vh - 56px);
+  min-height: 0;
+  overflow: auto;
   padding: 24px;
 }
 
@@ -280,6 +306,71 @@ button:disabled {
   align-items: flex-start;
   justify-content: space-between;
   margin-bottom: 20px;
+}
+
+.conversation-list {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.message-row {
+  display: grid;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.message-user {
+  justify-items: end;
+}
+
+.message-assistant {
+  justify-items: start;
+}
+
+.message-meta {
+  display: flex;
+  gap: 10px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.message-content {
+  max-width: min(760px, 100%);
+  margin: 0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: #172026;
+  background: #f8fafc;
+  line-height: 1.6;
+}
+
+.message-user .message-content {
+  color: #ffffff;
+  background: #1f6feb;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px;
+  gap: 12px;
+  border-top: 1px solid #e2e8f0;
+  margin-top: 18px;
+  padding-top: 16px;
+}
+
+.composer textarea {
+  min-height: 76px;
+  max-height: 180px;
+}
+
+.composer button {
+  align-self: stretch;
 }
 
 .status-pill {
@@ -336,6 +427,11 @@ button:disabled {
 .timeline {
   display: grid;
   gap: 14px;
+}
+
+.timeline.embedded {
+  width: min(860px, 100%);
+  margin-top: 4px;
 }
 
 .step-card {
@@ -462,7 +558,7 @@ pre {
 
 .state-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -529,10 +625,54 @@ pre {
   color: #b45309;
 }
 
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .content-stack {
+    display: grid;
+    min-width: 0;
+    gap: 18px;
+    align-content: start;
+  }
+
+  .conversation-workspace {
+    height: auto;
+    min-height: calc(100vh - 56px);
+  }
+
+  .conversation-list {
+    max-height: calc(100vh - 260px);
+  }
+
+  .task-panel,
+  .state-panel {
+    height: auto;
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .state-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 860px) {
   .shell {
     grid-template-columns: 1fr;
     padding: 18px;
+  }
+
+  .task-panel {
+    position: static;
+    height: auto;
+    max-height: none;
+    overflow: visible;
   }
 
   .task-panel,
@@ -550,6 +690,10 @@ pre {
   .workspace-header,
   .step-header {
     display: grid;
+  }
+
+  .composer {
+    grid-template-columns: 1fr;
   }
 
   .step-card {

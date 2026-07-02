@@ -1,28 +1,45 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import type { AgentRun, AgentRunEvent, AgentRunSummary, AgentStep, SandboxState } from "@agentflow/shared";
 
 type UiStatus = AgentRun["status"] | "idle";
 
+type ConversationMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+  run?: AgentRun;
+  steps?: AgentStep[];
+  status?: UiStatus;
+  errorMessage?: string;
+};
+
 const API_BASE_URL = "http://127.0.0.1:3001";
 const sampleTask = "处理工单 T-1001：判断客户是否符合退款规则，必要时创建退款并更新工单状态。";
 
-const task = ref(sampleTask);
-const steps = ref<AgentStep[]>([]);
-const status = ref<UiStatus>("idle");
-const runId = ref("");
-const errorMessage = ref("");
+const draft = ref(sampleTask);
+const messages = ref<ConversationMessage[]>([]);
+const activeAssistantMessageId = ref("");
+const focusedTask = ref(sampleTask);
 const sandboxState = ref<SandboxState>();
 const baselineState = ref<SandboxState>();
 const stateError = ref("");
 const runHistory = ref<AgentRunSummary[]>([]);
 const historyError = ref("");
 const resolvingApproval = ref(false);
+const conversationEl = ref<HTMLElement>();
 let eventSource: EventSource | undefined;
 
+const activeAssistantMessage = computed(() =>
+  messages.value.find((message) => message.id === activeAssistantMessageId.value && message.role === "assistant"),
+);
+const activeRun = computed(() => activeAssistantMessage.value?.run);
+const activeSteps = computed(() => activeAssistantMessage.value?.steps ?? []);
+const status = computed<UiStatus>(() => activeAssistantMessage.value?.status ?? "idle");
 const isRunning = computed(() => status.value === "running");
 const isBusy = computed(() => status.value === "running" || status.value === "waiting_approval");
-const requestedTicketId = computed(() => extractTicketId(task.value) ?? "T-1001");
+const requestedTicketId = computed(() => extractTicketId(focusedTask.value) ?? "T-1001");
 const targetTicket = computed(() => sandboxState.value?.tickets.find((ticket) => ticket.id === requestedTicketId.value));
 const targetOrder = computed(() => sandboxState.value?.orders.find((order) => order.id === targetTicket.value?.orderId));
 const targetCustomer = computed(() =>
@@ -46,6 +63,10 @@ const statusLabel = computed(() => {
   return labels[status.value];
 });
 
+function createMessageId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function formatRunTime(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
     hour: "2-digit",
@@ -63,12 +84,24 @@ function cloneState(state: SandboxState | undefined) {
   return state ? JSON.parse(JSON.stringify(state)) as SandboxState : undefined;
 }
 
-/** 从任务文本中提取目标工单号，让沙箱状态面板跟随当前处理对象。 */
 function extractTicketId(value: string) {
   return value.match(/T-\d+/i)?.[0].toUpperCase();
 }
 
-/** 拉取当前沙箱状态，页面初始化和 Agent 执行完成后都会调用。 */
+function scrollConversationToBottom() {
+  void nextTick(() => {
+    if (conversationEl.value) {
+      conversationEl.value.scrollTop = conversationEl.value.scrollHeight;
+    }
+  });
+}
+
+function updateActiveAssistant(update: (message: ConversationMessage) => ConversationMessage) {
+  messages.value = messages.value.map((message) =>
+    message.id === activeAssistantMessageId.value && message.role === "assistant" ? update(message) : message,
+  );
+}
+
 async function refreshSandboxState() {
   try {
     stateError.value = "";
@@ -84,7 +117,6 @@ async function refreshSandboxState() {
   }
 }
 
-/** 拉取历史运行摘要列表，侧边栏只展示轻量信息。 */
 async function refreshRunHistory() {
   try {
     historyError.value = "";
@@ -100,7 +132,6 @@ async function refreshRunHistory() {
   }
 }
 
-/** 点击历史记录后读取完整 run 快照，并恢复到当前时间线区域。 */
 async function loadRunFromHistory(historyRunId: string) {
   try {
     historyError.value = "";
@@ -113,18 +144,33 @@ async function loadRunFromHistory(historyRunId: string) {
     }
 
     const run = await response.json() as AgentRun;
-    task.value = run.task;
-    runId.value = run.id;
-    status.value = run.status;
-    steps.value = run.steps;
-    errorMessage.value = "";
+    const userMessage: ConversationMessage = {
+      id: createMessageId("user-history"),
+      role: "user",
+      content: run.task,
+      createdAt: run.createdAt,
+    };
+    const assistantMessage: ConversationMessage = {
+      id: createMessageId("assistant-history"),
+      role: "assistant",
+      content: "已从运行历史恢复这次 Agent 执行。",
+      createdAt: run.completedAt ?? run.createdAt,
+      run,
+      steps: run.steps,
+      status: run.status,
+    };
+
+    focusedTask.value = run.task;
+    draft.value = run.task;
+    activeAssistantMessageId.value = assistantMessage.id;
     baselineState.value = undefined;
+    messages.value = [...messages.value, userMessage, assistantMessage];
+    scrollConversationToBottom();
   } catch (error) {
     historyError.value = error instanceof Error ? error.message : "运行历史读取失败";
   }
 }
 
-/** 清理后端内存中的 trace 历史，同时重置前端列表。 */
 async function clearRunHistory() {
   try {
     historyError.value = "";
@@ -143,41 +189,48 @@ async function clearRunHistory() {
 }
 
 function updateApprovalStep(payload: Extract<AgentRunEvent, { kind: "approval_resolved" }>) {
-  steps.value = steps.value.map((step) => {
-    if (step.approvalRequest?.id !== payload.approval.id) {
-      return step;
-    }
+  updateActiveAssistant((message) => ({
+    ...message,
+    run: payload.run,
+    status: payload.run.status,
+    steps: (message.steps ?? []).map((step) => {
+      if (step.approvalRequest?.id !== payload.approval.id) {
+        return step;
+      }
 
-    return {
-      ...step,
-      approvalRequest: payload.approval,
-      detail: JSON.stringify(
-        {
-          approvalId: payload.approval.id,
-          toolCallId: payload.approval.toolCallId,
-          riskLevel: payload.approval.riskLevel,
-          status: payload.approval.status,
-          input: payload.approval.input,
-          reason: payload.approval.reason,
-        },
-        null,
-        2,
-      ),
-      status: payload.approval.status === "approved" ? "completed" : "failed",
-    };
-  });
+      return {
+        ...step,
+        approvalRequest: payload.approval,
+        detail: JSON.stringify(
+          {
+            approvalId: payload.approval.id,
+            toolCallId: payload.approval.toolCallId,
+            riskLevel: payload.approval.riskLevel,
+            status: payload.approval.status,
+            input: payload.approval.input,
+            reason: payload.approval.reason,
+          },
+          null,
+          2,
+        ),
+        status: payload.approval.status === "approved" ? "completed" : "failed",
+      };
+    }),
+  }));
 }
 
-/** 批准或拒绝当前 run 的待审批高风险工具调用，SSE 会继续推送后续事件。 */
-async function resolveApproval(action: "approve" | "reject") {
-  if (!runId.value || resolvingApproval.value) {
+async function resolveApproval(action: "approve" | "reject", messageId: string) {
+  const targetMessage = messages.value.find((message) => message.id === messageId && message.role === "assistant");
+  const targetRunId = targetMessage?.run?.id;
+
+  if (!targetRunId || resolvingApproval.value) {
     return;
   }
 
   try {
     resolvingApproval.value = true;
-    errorMessage.value = "";
-    const response = await fetch(`${API_BASE_URL}/agent/runs/${runId.value}/${action}`, {
+    activeAssistantMessageId.value = messageId;
+    const response = await fetch(`${API_BASE_URL}/agent/runs/${targetRunId}/${action}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -191,13 +244,15 @@ async function resolveApproval(action: "approve" | "reject") {
       throw new Error(`Approval ${action} request failed: ${response.status}`);
     }
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "人工审批请求失败";
+    const errorMessage = error instanceof Error ? error.message : "人工审批请求失败";
+    messages.value = messages.value.map((message) =>
+      message.id === messageId ? { ...message, errorMessage } : message,
+    );
   } finally {
     resolvingApproval.value = false;
   }
 }
 
-/** 重置后端内存沙箱，并清理前端本次运行留下的 trace 和变化基线。 */
 async function resetSandbox() {
   try {
     stateError.value = "";
@@ -215,16 +270,11 @@ async function resetSandbox() {
 
     sandboxState.value = await response.json() as SandboxState;
     baselineState.value = undefined;
-    steps.value = [];
-    runId.value = "";
-    errorMessage.value = "";
-    status.value = "idle";
   } catch (error) {
     stateError.value = error instanceof Error ? error.message : "沙箱重置失败";
   }
 }
 
-/** 根据执行前快照判断字段是否发生变化，用于状态面板高亮。 */
 function didChange(path: "ticket.status" | "order.refundStatus" | "refunds.length") {
   if (!baselineState.value || !sandboxState.value) {
     return false;
@@ -255,7 +305,6 @@ function readEvent(event: Event): AgentRunEvent | undefined {
     return undefined;
   }
 
-  // SSE 的 data 字段是后端 JSON.stringify 后的事件载荷，这里统一还原成共享事件类型。
   return JSON.parse(message.data) as AgentRunEvent;
 }
 
@@ -267,48 +316,68 @@ async function applyRunEvent(event: Event) {
   }
 
   if (payload.kind === "run_started") {
-    runId.value = payload.run.id;
-    status.value = payload.run.status;
-    steps.value = [];
+    updateActiveAssistant((message) => ({
+      ...message,
+      run: payload.run,
+      status: payload.run.status,
+      steps: [],
+      errorMessage: "",
+    }));
+    scrollConversationToBottom();
     return;
   }
 
   if (payload.kind === "step") {
-    steps.value = [...steps.value, payload.step];
+    updateActiveAssistant((message) => ({
+      ...message,
+      steps: [...(message.steps ?? []), payload.step],
+    }));
+    scrollConversationToBottom();
     return;
   }
 
   if (payload.kind === "approval_required") {
-    runId.value = payload.run.id;
-    status.value = payload.run.status;
-    steps.value = [...steps.value, payload.step];
+    updateActiveAssistant((message) => ({
+      ...message,
+      run: payload.run,
+      status: payload.run.status,
+      steps: [...(message.steps ?? []), payload.step],
+    }));
+    scrollConversationToBottom();
     return;
   }
 
   if (payload.kind === "approval_resolved") {
-    runId.value = payload.run.id;
-    status.value = payload.run.status;
     updateApprovalStep(payload);
+    scrollConversationToBottom();
     return;
   }
 
   if (payload.kind === "run_completed") {
-    runId.value = payload.run.id;
-    status.value = payload.run.status;
-    steps.value = payload.run.steps;
+    updateActiveAssistant((message) => ({
+      ...message,
+      run: payload.run,
+      status: payload.run.status,
+      steps: payload.run.steps,
+      content: "Agent 已完成本次任务。",
+    }));
     closeStream();
     await refreshSandboxState();
     await refreshRunHistory();
+    scrollConversationToBottom();
     return;
   }
 
-  errorMessage.value = payload.message;
-  status.value = "failed";
+  updateActiveAssistant((message) => ({
+    ...message,
+    status: "failed",
+    errorMessage: payload.message,
+  }));
   closeStream();
 }
 
-async function runTask() {
-  const nextTask = task.value.trim();
+async function sendMessage() {
+  const nextTask = draft.value.trim();
 
   if (!nextTask || isBusy.value) {
     return;
@@ -317,13 +386,28 @@ async function runTask() {
   closeStream();
   await refreshSandboxState();
   baselineState.value = cloneState(sandboxState.value);
-  steps.value = [];
-  runId.value = "";
-  errorMessage.value = "";
-  resolvingApproval.value = false;
-  status.value = "running";
+  focusedTask.value = nextTask;
 
-  // EventSource 只能发 GET 请求，所以任务内容通过 query string 传给后端 SSE 接口。
+  const userMessage: ConversationMessage = {
+    id: createMessageId("user"),
+    role: "user",
+    content: nextTask,
+    createdAt: new Date().toISOString(),
+  };
+  const assistantMessage: ConversationMessage = {
+    id: createMessageId("assistant"),
+    role: "assistant",
+    content: "正在执行 Agent 任务...",
+    createdAt: new Date().toISOString(),
+    steps: [],
+    status: "running",
+  };
+
+  messages.value = [...messages.value, userMessage, assistantMessage];
+  activeAssistantMessageId.value = assistantMessage.id;
+  draft.value = "";
+  scrollConversationToBottom();
+
   const url = new URL(`${API_BASE_URL}/agent/run/stream`);
   url.searchParams.set("task", nextTask);
   eventSource = new EventSource(url);
@@ -335,18 +419,22 @@ async function runTask() {
   eventSource.addEventListener("run_completed", applyRunEvent);
   eventSource.addEventListener("error", (event) => {
     const payload = readEvent(event);
+    const errorMessage = payload?.kind === "error" ? payload.message : "执行流连接中断，请确认后端服务是否正在运行。";
 
-    if (payload?.kind === "error") {
-      errorMessage.value = payload.message;
-    } else if (status.value === "running") {
-      errorMessage.value = "执行流连接中断，请确认后端服务是否正在运行。";
-    }
-
-    if (status.value === "running") {
-      status.value = "failed";
-      closeStream();
-    }
+    updateActiveAssistant((message) => ({
+      ...message,
+      status: "failed",
+      errorMessage,
+    }));
+    closeStream();
   });
+}
+
+function handleComposerKeydown(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    event.preventDefault();
+    void sendMessage();
+  }
 }
 
 onMounted(() => {
@@ -364,15 +452,6 @@ onBeforeUnmount(closeStream);
         <h1>企业工单处理 Agent 工作台</h1>
       </div>
 
-      <label class="field">
-        <span>任务</span>
-        <textarea v-model="task" aria-label="任务输入" />
-      </label>
-
-      <button type="button" :disabled="isBusy || !task.trim()" @click="runTask">
-        {{ isRunning ? "执行中..." : status === "waiting_approval" ? "等待审批" : "开始执行" }}
-      </button>
-
       <dl class="run-meta">
         <div>
           <dt>状态</dt>
@@ -380,11 +459,9 @@ onBeforeUnmount(closeStream);
         </div>
         <div>
           <dt>Run ID</dt>
-          <dd>{{ runId || "未生成" }}</dd>
+          <dd>{{ activeRun?.id || "未生成" }}</dd>
         </div>
       </dl>
-
-      <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
 
       <section class="history-panel" aria-label="运行历史">
         <header class="history-header">
@@ -422,44 +499,88 @@ onBeforeUnmount(closeStream);
     </section>
 
     <div class="content-stack">
-      <section class="workspace" aria-label="执行工作区">
+      <section class="workspace conversation-workspace" aria-label="会话工作区">
         <header class="workspace-header">
           <div>
-            <p class="eyebrow muted">Execution Trace</p>
-            <h2>实时执行时间线</h2>
+            <p class="eyebrow muted">Conversation Workspace</p>
+            <h2>会话式执行工作台</h2>
           </div>
           <span class="status-pill" :class="`status-${status}`">{{ statusLabel }}</span>
         </header>
 
-        <div v-if="steps.length === 0" class="empty-state">
-          输入任务后启动 Agent，执行计划、工具调用、观察结果、人工审批和最终报告会按流式事件追加到这里。
-        </div>
+        <div ref="conversationEl" class="conversation-list">
+          <div v-if="messages.length === 0" class="empty-state">
+            发送一条任务开始会话。每条用户消息都会触发一次 Agent run，执行 trace 会挂在对应的 Agent 回复下方。
+          </div>
 
-        <div v-else class="timeline">
-          <article v-for="(step, index) in steps" :key="step.id" class="step-card" :class="`step-${step.type}`">
-            <div class="step-index">{{ index + 1 }}</div>
-            <div class="step-body">
-              <div class="step-header">
-                <div>
-                  <span class="step-type">{{ step.type.replace("_", " ") }}</span>
-                  <h3>{{ step.title }}</h3>
+          <article
+            v-for="message in messages"
+            :key="message.id"
+            class="message-row"
+            :class="`message-${message.role}`"
+          >
+            <div class="message-meta">
+              <span>{{ message.role === "user" ? "你" : "Agent" }}</span>
+              <span>{{ formatRunTime(message.createdAt) }}</span>
+            </div>
+            <p class="message-content">{{ message.content }}</p>
+
+            <p v-if="message.errorMessage" class="error-text">{{ message.errorMessage }}</p>
+
+            <div v-if="message.role === 'assistant' && (message.steps?.length ?? 0) > 0" class="timeline embedded">
+              <article
+                v-for="(step, index) in message.steps"
+                :key="step.id"
+                class="step-card"
+                :class="`step-${step.type}`"
+              >
+                <div class="step-index">{{ index + 1 }}</div>
+                <div class="step-body">
+                  <div class="step-header">
+                    <div>
+                      <span class="step-type">{{ step.type.replace("_", " ") }}</span>
+                      <h3>{{ step.title }}</h3>
+                    </div>
+                    <span v-if="step.durationMs != null" class="duration">{{ step.durationMs }}ms</span>
+                  </div>
+
+                  <p v-if="step.toolName" class="tool-name">{{ step.toolName }}</p>
+                  <pre>{{ step.detail }}</pre>
+
+                  <div v-if="step.approvalRequest?.status === 'pending'" class="approval-actions">
+                    <button
+                      type="button"
+                      class="approve-button"
+                      :disabled="resolvingApproval"
+                      @click="resolveApproval('approve', message.id)"
+                    >
+                      批准
+                    </button>
+                    <button
+                      type="button"
+                      class="reject-button"
+                      :disabled="resolvingApproval"
+                      @click="resolveApproval('reject', message.id)"
+                    >
+                      拒绝
+                    </button>
+                  </div>
                 </div>
-                <span v-if="step.durationMs != null" class="duration">{{ step.durationMs }}ms</span>
-              </div>
-
-              <p v-if="step.toolName" class="tool-name">{{ step.toolName }}</p>
-              <pre>{{ step.detail }}</pre>
-
-              <div v-if="step.approvalRequest?.status === 'pending'" class="approval-actions">
-                <button type="button" class="approve-button" :disabled="resolvingApproval" @click="resolveApproval('approve')">
-                  批准
-                </button>
-                <button type="button" class="reject-button" :disabled="resolvingApproval" @click="resolveApproval('reject')">
-                  拒绝
-                </button>
-              </div>
+              </article>
             </div>
           </article>
+        </div>
+
+        <div class="composer">
+          <textarea
+            v-model="draft"
+            aria-label="任务输入"
+            placeholder="输入下一条任务，例如：处理工单 T-1001..."
+            @keydown="handleComposerKeydown"
+          />
+          <button type="button" :disabled="isBusy || !draft.trim()" @click="sendMessage">
+            {{ isRunning ? "执行中..." : status === "waiting_approval" ? "等待审批" : "发送" }}
+          </button>
         </div>
       </section>
 

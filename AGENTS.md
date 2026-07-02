@@ -13,6 +13,7 @@
 ## 当前重点关注区域
 
 - `apps/web/src/App.vue`：前端任务提交、SSE 监听、执行时间线渲染、人工审批交互。
+- Week 7 起，`apps/web/src/App.vue` 采用单会话多轮消息流；每条用户消息对应一个 Agent run，trace 嵌在对应 assistant 消息下。
 - `apps/server/src/main.ts`：Fastify 路由、SSE 响应流、审批接口。
 - `apps/server/src/agent/executor.ts`：Agent 执行流程、步骤事件生成、Tool Calling 循环和审批暂停/恢复。
 - `apps/server/src/approval/approvalStore.ts`：高风险工具调用的内存审批状态。
