@@ -416,6 +416,35 @@ button:disabled {
   font-weight: 800;
 }
 
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.approval-actions button {
+  min-height: 38px;
+  padding: 0 16px;
+  font-size: 13px;
+}
+
+.approve-button {
+  background: #15803d;
+}
+
+.approve-button:hover {
+  background: #166534;
+}
+
+.reject-button {
+  background: #b91c1c;
+}
+
+.reject-button:hover {
+  background: #991b1b;
+}
+
 pre {
   max-width: 100%;
   margin: 12px 0 0;

@@ -29,3 +29,10 @@
 - OpenAI-compatible LLM Tool Calling loop.
 - Tool registry JSON Schema export for model-visible tools.
 - Mock fallback emits standard tool calls, so local demos keep the same execution path.
+
+## Week 6
+
+- Human approval gate for high-risk tools.
+- SSE events for `approval_required` and `approval_resolved`.
+- Frontend approval card with approve/reject actions.
+- Approval decision is returned to the LLM so execution can continue or produce a rejection-aware final answer.

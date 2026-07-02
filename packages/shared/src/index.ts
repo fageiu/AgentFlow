@@ -1,6 +1,22 @@
 /** Agent 执行时间线中的步骤类型。 */
 export type AgentStepType = "plan" | "tool_call" | "observation" | "approval" | "final";
 
+export type ApprovalStatus = "pending" | "approved" | "rejected";
+
+/** 高风险工具调用的人工审批请求，前后端通过它共享审批状态。 */
+export interface ApprovalRequest {
+  id: string;
+  runId: string;
+  toolCallId: string;
+  toolName: string;
+  riskLevel: "high";
+  input: unknown;
+  status: ApprovalStatus;
+  createdAt: string;
+  resolvedAt?: string;
+  reason?: string;
+}
+
 /** 单个执行步骤，前端会把它渲染成一张时间线卡片。 */
 export interface AgentStep {
   id: string;
@@ -10,6 +26,7 @@ export interface AgentStep {
   durationMs?: number;
   toolName?: string;
   status?: "running" | "completed" | "failed";
+  approvalRequest?: ApprovalRequest;
 }
 
 /** 一次 Agent 任务运行的完整快照。 */
@@ -41,6 +58,17 @@ export type AgentRunEvent =
   | {
       kind: "step";
       step: AgentStep;
+    }
+  | {
+      kind: "approval_required";
+      run: AgentRun;
+      approval: ApprovalRequest;
+      step: AgentStep;
+    }
+  | {
+      kind: "approval_resolved";
+      run: AgentRun;
+      approval: ApprovalRequest;
     }
   | {
       kind: "run_completed";

@@ -17,9 +17,11 @@ const baselineState = ref<SandboxState>();
 const stateError = ref("");
 const runHistory = ref<AgentRunSummary[]>([]);
 const historyError = ref("");
+const resolvingApproval = ref(false);
 let eventSource: EventSource | undefined;
 
 const isRunning = computed(() => status.value === "running");
+const isBusy = computed(() => status.value === "running" || status.value === "waiting_approval");
 const requestedTicketId = computed(() => extractTicketId(task.value) ?? "T-1001");
 const targetTicket = computed(() => sandboxState.value?.tickets.find((ticket) => ticket.id === requestedTicketId.value));
 const targetOrder = computed(() => sandboxState.value?.orders.find((order) => order.id === targetTicket.value?.orderId));
@@ -29,9 +31,7 @@ const targetCustomer = computed(() =>
 const targetRefunds = computed(() =>
   targetOrder.value ? sandboxState.value?.refunds.filter((refund) => refund.orderId === targetOrder.value?.id) ?? [] : [],
 );
-const latestRefund = computed(() => {
-  return targetRefunds.value.at(-1);
-});
+const latestRefund = computed(() => targetRefunds.value.at(-1));
 const matchedPolicy = computed(() => sandboxState.value?.policies.find((policy) => policy.keyword === "refund"));
 
 const statusLabel = computed(() => {
@@ -63,7 +63,7 @@ function cloneState(state: SandboxState | undefined) {
   return state ? JSON.parse(JSON.stringify(state)) as SandboxState : undefined;
 }
 
-/** 从任务文本中提取目标工单号，让沙箱状态面板跟随当前处理对象，而不是固定展示 T-1001。 */
+/** 从任务文本中提取目标工单号，让沙箱状态面板跟随当前处理对象。 */
 function extractTicketId(value: string) {
   return value.match(/T-\d+/i)?.[0].toUpperCase();
 }
@@ -84,7 +84,7 @@ async function refreshSandboxState() {
   }
 }
 
-/** 拉取历史运行摘要列表，用于侧边栏展示最近完成的 Agent trace。 */
+/** 拉取历史运行摘要列表，侧边栏只展示轻量信息。 */
 async function refreshRunHistory() {
   try {
     historyError.value = "";
@@ -139,6 +139,61 @@ async function clearRunHistory() {
     runHistory.value = [];
   } catch (error) {
     historyError.value = error instanceof Error ? error.message : "运行历史清空失败";
+  }
+}
+
+function updateApprovalStep(payload: Extract<AgentRunEvent, { kind: "approval_resolved" }>) {
+  steps.value = steps.value.map((step) => {
+    if (step.approvalRequest?.id !== payload.approval.id) {
+      return step;
+    }
+
+    return {
+      ...step,
+      approvalRequest: payload.approval,
+      detail: JSON.stringify(
+        {
+          approvalId: payload.approval.id,
+          toolCallId: payload.approval.toolCallId,
+          riskLevel: payload.approval.riskLevel,
+          status: payload.approval.status,
+          input: payload.approval.input,
+          reason: payload.approval.reason,
+        },
+        null,
+        2,
+      ),
+      status: payload.approval.status === "approved" ? "completed" : "failed",
+    };
+  });
+}
+
+/** 批准或拒绝当前 run 的待审批高风险工具调用，SSE 会继续推送后续事件。 */
+async function resolveApproval(action: "approve" | "reject") {
+  if (!runId.value || resolvingApproval.value) {
+    return;
+  }
+
+  try {
+    resolvingApproval.value = true;
+    errorMessage.value = "";
+    const response = await fetch(`${API_BASE_URL}/agent/runs/${runId.value}/${action}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        reason: action === "approve" ? "人工批准高风险工具调用。" : "人工拒绝高风险工具调用。",
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Approval ${action} request failed: ${response.status}`);
+    }
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : "人工审批请求失败";
+  } finally {
+    resolvingApproval.value = false;
   }
 }
 
@@ -219,8 +274,21 @@ async function applyRunEvent(event: Event) {
   }
 
   if (payload.kind === "step") {
-    // 每收到一个 step，就追加一张时间线卡片；不要覆盖已有步骤。
     steps.value = [...steps.value, payload.step];
+    return;
+  }
+
+  if (payload.kind === "approval_required") {
+    runId.value = payload.run.id;
+    status.value = payload.run.status;
+    steps.value = [...steps.value, payload.step];
+    return;
+  }
+
+  if (payload.kind === "approval_resolved") {
+    runId.value = payload.run.id;
+    status.value = payload.run.status;
+    updateApprovalStep(payload);
     return;
   }
 
@@ -242,7 +310,7 @@ async function applyRunEvent(event: Event) {
 async function runTask() {
   const nextTask = task.value.trim();
 
-  if (!nextTask || isRunning.value) {
+  if (!nextTask || isBusy.value) {
     return;
   }
 
@@ -252,6 +320,7 @@ async function runTask() {
   steps.value = [];
   runId.value = "";
   errorMessage.value = "";
+  resolvingApproval.value = false;
   status.value = "running";
 
   // EventSource 只能发 GET 请求，所以任务内容通过 query string 传给后端 SSE 接口。
@@ -259,9 +328,10 @@ async function runTask() {
   url.searchParams.set("task", nextTask);
   eventSource = new EventSource(url);
 
-  // 后端按事件名推送 run_started / step / run_completed，前端分别监听并更新状态。
   eventSource.addEventListener("run_started", applyRunEvent);
   eventSource.addEventListener("step", applyRunEvent);
+  eventSource.addEventListener("approval_required", applyRunEvent);
+  eventSource.addEventListener("approval_resolved", applyRunEvent);
   eventSource.addEventListener("run_completed", applyRunEvent);
   eventSource.addEventListener("error", (event) => {
     const payload = readEvent(event);
@@ -299,8 +369,8 @@ onBeforeUnmount(closeStream);
         <textarea v-model="task" aria-label="任务输入" />
       </label>
 
-      <button type="button" :disabled="isRunning || !task.trim()" @click="runTask">
-        {{ isRunning ? "执行中..." : "开始执行" }}
+      <button type="button" :disabled="isBusy || !task.trim()" @click="runTask">
+        {{ isRunning ? "执行中..." : status === "waiting_approval" ? "等待审批" : "开始执行" }}
       </button>
 
       <dl class="run-meta">
@@ -362,7 +432,7 @@ onBeforeUnmount(closeStream);
         </header>
 
         <div v-if="steps.length === 0" class="empty-state">
-          输入任务后启动 Agent，执行计划、工具调用、观察结果和最终报告会按流式事件追加到这里。
+          输入任务后启动 Agent，执行计划、工具调用、观察结果、人工审批和最终报告会按流式事件追加到这里。
         </div>
 
         <div v-else class="timeline">
@@ -379,6 +449,15 @@ onBeforeUnmount(closeStream);
 
               <p v-if="step.toolName" class="tool-name">{{ step.toolName }}</p>
               <pre>{{ step.detail }}</pre>
+
+              <div v-if="step.approvalRequest?.status === 'pending'" class="approval-actions">
+                <button type="button" class="approve-button" :disabled="resolvingApproval" @click="resolveApproval('approve')">
+                  批准
+                </button>
+                <button type="button" class="reject-button" :disabled="resolvingApproval" @click="resolveApproval('reject')">
+                  拒绝
+                </button>
+              </div>
             </div>
           </article>
         </div>

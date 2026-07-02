@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import Fastify from "fastify";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AgentRunEvent } from "@agentflow/shared";
+import { getPendingApprovalByRun, resolveApprovalForRun } from "./approval/approvalStore.js";
 import { runAgentTask, streamAgentTask } from "./agent/executor.js";
 import { clearRuns, getRun, listRuns } from "./trace/runStore.js";
 import { getSandboxState, resetSandboxState } from "./tools/sandboxTools.js";
@@ -19,6 +20,10 @@ interface StreamAgentQuery {
 /** 历史 trace 明细接口的路径参数。 */
 interface RunHistoryParams {
   runId: string;
+}
+
+interface ResolveApprovalBody {
+  reason?: string;
 }
 
 const app = Fastify({ logger: true });
@@ -57,6 +62,54 @@ async function handleGetAgentRun(
 async function handleClearAgentRuns() {
   clearRuns();
   return { ok: true };
+}
+
+/** 查看当前 run 是否有等待中的人工审批，便于前端刷新后恢复审批卡片状态。 */
+async function handleGetPendingApproval(
+  request: FastifyRequest<{ Params: RunHistoryParams }>,
+  reply: FastifyReply,
+) {
+  const approval = getPendingApprovalByRun(request.params.runId);
+
+  if (!approval) {
+    return reply.code(404).send({ message: "Pending approval not found." });
+  }
+
+  return approval;
+}
+
+/** 批准当前 run 等待中的高风险工具调用，executor 会被唤醒并继续执行工具。 */
+async function handleApproveRun(
+  request: FastifyRequest<{ Body: ResolveApprovalBody; Params: RunHistoryParams }>,
+  reply: FastifyReply,
+) {
+  const approval = resolveApprovalForRun(request.params.runId, {
+    status: "approved",
+    reason: request.body?.reason,
+  });
+
+  if (!approval) {
+    return reply.code(404).send({ message: "Pending approval not found." });
+  }
+
+  return approval;
+}
+
+/** 拒绝当前 run 等待中的高风险工具调用，executor 会把拒绝结果交回 LLM 生成结论。 */
+async function handleRejectRun(
+  request: FastifyRequest<{ Body: ResolveApprovalBody; Params: RunHistoryParams }>,
+  reply: FastifyReply,
+) {
+  const approval = resolveApprovalForRun(request.params.runId, {
+    status: "rejected",
+    reason: request.body?.reason ?? "人工拒绝高风险工具调用。",
+  });
+
+  if (!approval) {
+    return reply.code(404).send({ message: "Pending approval not found." });
+  }
+
+  return approval;
 }
 
 /**
@@ -118,6 +171,9 @@ async function handleRunAgentStream(
 app.post<{ Body: RunAgentBody }>("/agent/run", handleRunAgent);
 app.get<{ Querystring: StreamAgentQuery }>("/agent/run/stream", handleRunAgentStream);
 app.get<{ Params: RunHistoryParams }>("/agent/runs/:runId", handleGetAgentRun);
+app.get<{ Params: RunHistoryParams }>("/agent/runs/:runId/approval", handleGetPendingApproval);
+app.post<{ Body: ResolveApprovalBody; Params: RunHistoryParams }>("/agent/runs/:runId/approve", handleApproveRun);
+app.post<{ Body: ResolveApprovalBody; Params: RunHistoryParams }>("/agent/runs/:runId/reject", handleRejectRun);
 app.delete("/agent/runs", handleClearAgentRuns);
 
 await app.listen({ host: "127.0.0.1", port: 3001 });
