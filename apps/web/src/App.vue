@@ -1,19 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import type { AgentRun, AgentRunEvent, AgentRunSummary, AgentStep, SandboxState } from "@agentflow/shared";
+import type {
+  AgentRun,
+  AgentRunEvent,
+  AgentRunSummary,
+  ConversationMessage,
+  ConversationSession,
+  ConversationSessionSummary,
+  SandboxState,
+} from "@agentflow/shared";
 
 type UiStatus = AgentRun["status"] | "idle";
-
-type ConversationMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  createdAt: string;
-  run?: AgentRun;
-  steps?: AgentStep[];
-  status?: UiStatus;
-  errorMessage?: string;
-};
 
 const API_BASE_URL = "http://127.0.0.1:3001";
 const sampleTask = "处理工单 T-1001：判断客户是否符合退款规则，必要时创建退款并更新工单状态。";
@@ -25,6 +22,9 @@ const focusedTask = ref(sampleTask);
 const sandboxState = ref<SandboxState>();
 const baselineState = ref<SandboxState>();
 const stateError = ref("");
+const conversations = ref<ConversationSessionSummary[]>([]);
+const activeConversationId = ref("");
+const conversationError = ref("");
 const runHistory = ref<AgentRunSummary[]>([]);
 const historyError = ref("");
 const resolvingApproval = ref(false);
@@ -186,6 +186,101 @@ async function clearRunHistory() {
   } catch (error) {
     historyError.value = error instanceof Error ? error.message : "运行历史清空失败";
   }
+}
+
+async function refreshConversations() {
+  try {
+    conversationError.value = "";
+    const response = await fetch(`${API_BASE_URL}/agent/conversations`);
+
+    if (!response.ok) {
+      throw new Error(`Conversation list request failed: ${response.status}`);
+    }
+
+    conversations.value = await response.json() as ConversationSessionSummary[];
+  } catch (error) {
+    conversationError.value = error instanceof Error ? error.message : "会话列表获取失败";
+  }
+}
+
+function selectLatestAssistantMessage(session: ConversationSession) {
+  return [...session.messages].reverse().find((message) => message.role === "assistant")?.id ?? "";
+}
+
+async function loadConversation(conversationId: string) {
+  try {
+    conversationError.value = "";
+    closeStream();
+
+    const response = await fetch(`${API_BASE_URL}/agent/conversations/${conversationId}`);
+
+    if (!response.ok) {
+      throw new Error(`Conversation detail request failed: ${response.status}`);
+    }
+
+    const session = await response.json() as ConversationSession;
+    activeConversationId.value = session.id;
+    messages.value = session.messages;
+    activeAssistantMessageId.value = selectLatestAssistantMessage(session);
+    focusedTask.value = [...session.messages].reverse().find((message) => message.role === "user")?.content ?? sampleTask;
+    draft.value = "";
+    baselineState.value = undefined;
+    scrollConversationToBottom();
+  } catch (error) {
+    conversationError.value = error instanceof Error ? error.message : "会话读取失败";
+  }
+}
+
+async function createNewConversation() {
+  try {
+    conversationError.value = "";
+    closeStream();
+
+    const response = await fetch(`${API_BASE_URL}/agent/conversations`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ title: "新会话" }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Conversation create request failed: ${response.status}`);
+    }
+
+    const session = await response.json() as ConversationSession;
+    activeConversationId.value = session.id;
+    messages.value = [];
+    activeAssistantMessageId.value = "";
+    draft.value = sampleTask;
+    baselineState.value = undefined;
+    await refreshConversations();
+  } catch (error) {
+    conversationError.value = error instanceof Error ? error.message : "会话创建失败";
+  }
+}
+
+async function ensureConversation() {
+  if (activeConversationId.value) {
+    return activeConversationId.value;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/agent/conversations`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ title: "新会话" }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Conversation create request failed: ${response.status}`);
+  }
+
+  const session = await response.json() as ConversationSession;
+  activeConversationId.value = session.id;
+  await refreshConversations();
+  return session.id;
 }
 
 function updateApprovalStep(payload: Extract<AgentRunEvent, { kind: "approval_resolved" }>) {
@@ -363,7 +458,7 @@ async function applyRunEvent(event: Event) {
     }));
     closeStream();
     await refreshSandboxState();
-    await refreshRunHistory();
+    await refreshConversations();
     scrollConversationToBottom();
     return;
   }
@@ -384,6 +479,7 @@ async function sendMessage() {
   }
 
   closeStream();
+  const conversationId = await ensureConversation();
   await refreshSandboxState();
   baselineState.value = cloneState(sandboxState.value);
   focusedTask.value = nextTask;
@@ -410,6 +506,9 @@ async function sendMessage() {
 
   const url = new URL(`${API_BASE_URL}/agent/run/stream`);
   url.searchParams.set("task", nextTask);
+  url.searchParams.set("conversationId", conversationId);
+  url.searchParams.set("userMessageId", userMessage.id);
+  url.searchParams.set("assistantMessageId", assistantMessage.id);
   eventSource = new EventSource(url);
 
   eventSource.addEventListener("run_started", applyRunEvent);
@@ -439,7 +538,13 @@ function handleComposerKeydown(event: KeyboardEvent) {
 
 onMounted(() => {
   void refreshSandboxState();
-  void refreshRunHistory();
+  void (async () => {
+    await refreshConversations();
+
+    if (conversations.value[0]) {
+      await loadConversation(conversations.value[0].id);
+    }
+  })();
 });
 onBeforeUnmount(closeStream);
 </script>
@@ -463,35 +568,34 @@ onBeforeUnmount(closeStream);
         </div>
       </dl>
 
-      <section class="history-panel" aria-label="运行历史">
+      <section class="history-panel" aria-label="会话列表">
         <header class="history-header">
           <div>
-            <p class="eyebrow muted">Run History</p>
-            <h2>运行历史</h2>
+            <p class="eyebrow muted">Conversations</p>
+            <h2>会话</h2>
           </div>
           <div class="history-actions">
-            <button class="ghost-button" type="button" @click="refreshRunHistory">刷新</button>
-            <button class="ghost-button danger" type="button" :disabled="runHistory.length === 0" @click="clearRunHistory">
-              清空
-            </button>
+            <button class="ghost-button" type="button" @click="refreshConversations">刷新</button>
+            <button class="ghost-button" type="button" @click="createNewConversation">新建</button>
           </div>
         </header>
 
-        <p v-if="historyError" class="error-text">{{ historyError }}</p>
+        <p v-if="conversationError" class="error-text">{{ conversationError }}</p>
 
-        <div v-else-if="runHistory.length === 0" class="empty-state compact">暂无运行历史</div>
+        <div v-else-if="conversations.length === 0" class="empty-state compact">暂无会话</div>
 
         <div v-else class="history-list">
           <button
-            v-for="historyRun in runHistory"
-            :key="historyRun.id"
+            v-for="conversation in conversations"
+            :key="conversation.id"
             class="history-item"
+            :class="{ active: conversation.id === activeConversationId }"
             type="button"
-            @click="loadRunFromHistory(historyRun.id)"
+            @click="loadConversation(conversation.id)"
           >
-            <span class="history-task">{{ historyRun.task }}</span>
+            <span class="history-task">{{ conversation.title }}</span>
             <span class="history-meta">
-              {{ formatRunTime(historyRun.createdAt) }} · {{ historyRun.stepCount }} steps · {{ historyRun.status }}
+              {{ formatRunTime(conversation.updatedAt) }} · {{ conversation.messageCount }} messages
             </span>
           </button>
         </div>

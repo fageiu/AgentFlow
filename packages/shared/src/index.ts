@@ -49,6 +49,45 @@ export interface AgentRunSummary {
   completedAt?: string;
 }
 
+/** 会话消息角色，目前只区分用户输入和 Agent 回复。 */
+export type ConversationMessageRole = "user" | "assistant";
+
+/** 会话消息展示状态，assistant 消息会跟随对应 AgentRun 的执行状态变化。 */
+export type ConversationMessageStatus = AgentRun["status"] | "idle";
+
+/** 可持久化的会话消息；assistant 消息可以携带所属 AgentRun 和嵌入式 trace。 */
+export interface ConversationMessage {
+  id: string;
+  role: ConversationMessageRole;
+  content: string;
+  createdAt: string;
+  run?: AgentRun;
+  steps?: AgentStep[];
+  status?: ConversationMessageStatus;
+  errorMessage?: string;
+}
+
+/** 可恢复的工作台会话，包含多轮消息以及消息下方嵌入的执行 trace。 */
+export interface ConversationSession {
+  id: string;
+  title: string;
+  messages: ConversationMessage[];
+  createdAt: string;
+  updatedAt: string;
+  activeRunId?: string;
+}
+
+/** 左侧会话列表使用的轻量摘要，避免列表接口返回完整消息和 trace。 */
+export interface ConversationSessionSummary {
+  id: string;
+  title: string;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+  activeRunId?: string;
+  lastMessagePreview?: string;
+}
+
 /** 前后端共享的 SSE 事件契约，避免事件名和 payload 结构各写一套。 */
 export type AgentRunEvent =
   | {

@@ -5,7 +5,7 @@
 以后在本项目中生成或修改代码时，需要遵守以下约定：
 
 - 在关键逻辑位置添加简洁注释，帮助理解代码意图。
-- 后端接口和关键函数需要添加注释。
+- 后端接口和关键函数需要添加中文注释。
 - 涉及前后端通信、SSE、Agent 执行流程、工具调用、人工审批、状态流转、错误处理等核心逻辑时，优先补充注释。
 - 新增较复杂模块时，同步在本文件中补充必要的项目级说明或协作约定。
 - 保持注释克制，避免把每一行代码都解释一遍。
@@ -19,6 +19,7 @@
 - `apps/server/src/approval/approvalStore.ts`：高风险工具调用的内存审批状态。
 - `apps/server/src/llm/*`：LLM 配置、Prompt 和 Provider 封装。
 - `apps/server/src/trace/runStore.ts`：AgentRun trace 历史的内存存储与摘要查询。
+- `apps/server/src/conversation/conversationStore.ts`：可恢复会话的内存存储，负责会话摘要、消息快照和消息内嵌 trace。
 - `apps/server/src/tools/toolRegistry.ts`：业务工具注册、参数校验、风险等级描述。
 - `packages/shared/src/index.ts`：前后端共享类型和事件契约。
 
@@ -52,3 +53,4 @@
 - 等待人工审批时也应保存 run 快照，便于历史接口看到 `waiting_approval` 状态。
 - `runStore.ts` 当前只做进程内存存储，后续替换数据库时应保持 `saveRun()`、`getRun()`、`listRuns()`、`clearRuns()` 的调用语义稳定。
 - 历史列表接口只返回 `AgentRunSummary`，完整步骤明细通过单条详情接口按需读取。
+- 会话列表接口只返回 `ConversationSessionSummary`，完整消息和嵌入式 trace 通过会话详情接口读取；`runStore` 仍作为审计 trace，`conversationStore` 负责恢复工作台上下文。

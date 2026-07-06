@@ -247,6 +247,11 @@ button:disabled {
   background: #eff6ff;
 }
 
+.history-item.active {
+  border-color: #1f6feb;
+  background: #eff6ff;
+}
+
 .history-task {
   display: -webkit-box;
   overflow: hidden;

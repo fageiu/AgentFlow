@@ -44,3 +44,11 @@
 - Each user message starts one Agent run.
 - Agent run trace is embedded under the corresponding assistant message.
 - Run history remains as an audit and restore entry.
+
+## Week 8
+
+- Recoverable conversation session model.
+- In-memory conversation store for session summaries and full message restore.
+- SSE execution persists user and assistant messages into the active conversation.
+- Frontend sidebar switches from run history to conversation list.
+- Users can create, switch, and continue conversations while run history remains an audit API.
