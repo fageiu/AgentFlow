@@ -16,6 +16,7 @@
 - Week 7 起，`apps/web/src/App.vue` 采用单会话多轮消息流；每条用户消息对应一个 Agent run，trace 嵌在对应 assistant 消息下。
 - `apps/server/src/main.ts`：Fastify 路由、SSE 响应流、审批接口。
 - `apps/server/src/agent/executor.ts`：Agent 执行流程、步骤事件生成、Tool Calling 循环和审批暂停/恢复。
+- `apps/server/src/agent/runControl.ts`：AgentRun 取消请求的进程内控制状态，executor 在步骤边界读取它来停止执行。
 - `apps/server/src/approval/approvalStore.ts`：高风险工具调用的内存审批状态。
 - `apps/server/src/llm/*`：LLM 配置、Prompt 和 Provider 封装。
 - `apps/server/src/trace/runStore.ts`：AgentRun trace 历史的内存存储与摘要查询。
@@ -54,3 +55,4 @@
 - `runStore.ts` 当前只做进程内存存储，后续替换数据库时应保持 `saveRun()`、`getRun()`、`listRuns()`、`clearRuns()` 的调用语义稳定。
 - 历史列表接口只返回 `AgentRunSummary`，完整步骤明细通过单条详情接口按需读取。
 - 会话列表接口只返回 `ConversationSessionSummary`，完整消息和嵌入式 trace 通过会话详情接口读取；`runStore` 仍作为审计 trace，`conversationStore` 负责恢复工作台上下文。
+- 取消执行通过 `runControl.ts` 记录 run 级别取消标记，`executor.ts` 负责把取消转换为 `cancelled` 状态和 `run_cancelled` SSE 事件，路由层不直接改写执行流程。

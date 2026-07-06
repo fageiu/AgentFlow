@@ -4,9 +4,11 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AgentRunEvent, ConversationMessage } from "@agentflow/shared";
 import { getPendingApprovalByRun, resolveApprovalForRun } from "./approval/approvalStore.js";
 import { runAgentTask, streamAgentTask } from "./agent/executor.js";
+import { requestRunCancel } from "./agent/runControl.js";
 import {
   clearConversations,
   createConversation,
+  deleteConversation,
   getConversation,
   listConversations,
   updateAssistantRunMessage,
@@ -44,6 +46,10 @@ interface CreateConversationBody {
 }
 
 interface ResolveApprovalBody {
+  reason?: string;
+}
+
+interface CancelRunBody {
   reason?: string;
 }
 
@@ -90,6 +96,24 @@ async function handleGetConversation(
 /** 清空当前进程内的会话存储，主要用于本地演示时重置工作台上下文。 */
 async function handleClearConversations() {
   clearConversations();
+  return { ok: true };
+}
+
+/** 删除指定会话；运行中或等待审批的会话会返回 409，要求用户先取消或完成 run。 */
+async function handleDeleteConversation(
+  request: FastifyRequest<{ Params: ConversationParams }>,
+  reply: FastifyReply,
+) {
+  const result = deleteConversation(request.params.conversationId);
+
+  if (result === "not_found") {
+    return reply.code(404).send({ message: "Conversation not found." });
+  }
+
+  if (result === "active_run") {
+    return reply.code(409).send({ message: "Conversation has an active run." });
+  }
+
   return { ok: true };
 }
 
@@ -161,6 +185,21 @@ async function handleRejectRun(
   return approval;
 }
 
+/** 取消正在执行或等待审批的 run；若 run 卡在审批点，会先拒绝审批来唤醒 executor。 */
+async function handleCancelRun(request: FastifyRequest<{ Body: CancelRunBody; Params: RunHistoryParams }>) {
+  const cancellation = requestRunCancel(request.params.runId, request.body?.reason ?? "用户取消执行");
+
+  resolveApprovalForRun(request.params.runId, {
+    status: "rejected",
+    reason: cancellation.reason,
+  });
+
+  return {
+    ok: true,
+    cancellation,
+  };
+}
+
 /**
  * 非流式 Agent 执行接口。
  * 这个接口会等完整执行结束后一次性返回 AgentRun，适合测试和脚本调试。
@@ -222,6 +261,17 @@ function persistRunEventToConversation(conversationId: string, assistantMessageI
       run: event.run,
       status: event.run.status,
       steps: event.run.steps,
+    });
+    return;
+  }
+
+  if (event.kind === "run_cancelled") {
+    updateAssistantRunMessage(conversationId, assistantMessageId, {
+      content: "Agent 执行已取消。",
+      run: event.run,
+      status: event.run.status,
+      steps: event.run.steps,
+      errorMessage: "本次执行已取消，可重试上一条任务。",
     });
   }
 }
@@ -302,10 +352,12 @@ app.post<{ Body: RunAgentBody }>("/agent/run", handleRunAgent);
 app.get<{ Querystring: StreamAgentQuery }>("/agent/run/stream", handleRunAgentStream);
 app.get<{ Params: ConversationParams }>("/agent/conversations/:conversationId", handleGetConversation);
 app.delete("/agent/conversations", handleClearConversations);
+app.delete<{ Params: ConversationParams }>("/agent/conversations/:conversationId", handleDeleteConversation);
 app.get<{ Params: RunHistoryParams }>("/agent/runs/:runId", handleGetAgentRun);
 app.get<{ Params: RunHistoryParams }>("/agent/runs/:runId/approval", handleGetPendingApproval);
 app.post<{ Body: ResolveApprovalBody; Params: RunHistoryParams }>("/agent/runs/:runId/approve", handleApproveRun);
 app.post<{ Body: ResolveApprovalBody; Params: RunHistoryParams }>("/agent/runs/:runId/reject", handleRejectRun);
+app.post<{ Body: CancelRunBody; Params: RunHistoryParams }>("/agent/runs/:runId/cancel", handleCancelRun);
 app.delete("/agent/runs", handleClearAgentRuns);
 
 await app.listen({ host: "127.0.0.1", port: 3001 });

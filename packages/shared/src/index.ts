@@ -25,7 +25,7 @@ export interface AgentStep {
   detail: string;
   durationMs?: number;
   toolName?: string;
-  status?: "running" | "completed" | "failed";
+  status?: "running" | "completed" | "failed" | "cancelled";
   approvalRequest?: ApprovalRequest;
 }
 
@@ -33,7 +33,7 @@ export interface AgentStep {
 export interface AgentRun {
   id: string;
   task: string;
-  status: "running" | "waiting_approval" | "completed" | "failed";
+  status: "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
   steps: AgentStep[];
   createdAt: string;
   completedAt?: string;
@@ -111,6 +111,11 @@ export type AgentRunEvent =
     }
   | {
       kind: "run_completed";
+      run: AgentRun;
+    }
+  /** run 被用户取消后发出，前端据此关闭执行态并展示可重试提示。 */
+  | {
+      kind: "run_cancelled";
       run: AgentRun;
     }
   | {

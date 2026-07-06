@@ -28,7 +28,10 @@ const conversationError = ref("");
 const runHistory = ref<AgentRunSummary[]>([]);
 const historyError = ref("");
 const resolvingApproval = ref(false);
+const cancellingRun = ref(false);
+const deletingConversationId = ref("");
 const conversationEl = ref<HTMLElement>();
+const composerInput = ref<HTMLTextAreaElement>();
 let eventSource: EventSource | undefined;
 
 const activeAssistantMessage = computed(() =>
@@ -39,6 +42,7 @@ const activeSteps = computed(() => activeAssistantMessage.value?.steps ?? []);
 const status = computed<UiStatus>(() => activeAssistantMessage.value?.status ?? "idle");
 const isRunning = computed(() => status.value === "running");
 const isBusy = computed(() => status.value === "running" || status.value === "waiting_approval");
+const canRetryLastTask = computed(() => messages.value.some((message) => message.role === "user") && !isBusy.value);
 const requestedTicketId = computed(() => extractTicketId(focusedTask.value) ?? "T-1001");
 const targetTicket = computed(() => sandboxState.value?.tickets.find((ticket) => ticket.id === requestedTicketId.value));
 const targetOrder = computed(() => sandboxState.value?.orders.find((order) => order.id === targetTicket.value?.orderId));
@@ -58,10 +62,24 @@ const statusLabel = computed(() => {
     waiting_approval: "待审批",
     completed: "已完成",
     failed: "失败",
+    cancelled: "已取消",
   };
 
   return labels[status.value];
 });
+
+function getStatusLabel(value: UiStatus | undefined) {
+  const labels: Record<UiStatus, string> = {
+    idle: "待执行",
+    running: "执行中",
+    waiting_approval: "待审批",
+    completed: "已完成",
+    failed: "失败",
+    cancelled: "已取消",
+  };
+
+  return labels[value ?? "idle"];
+}
 
 function createMessageId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -94,6 +112,19 @@ function scrollConversationToBottom() {
       conversationEl.value.scrollTop = conversationEl.value.scrollHeight;
     }
   });
+}
+
+function focusComposer() {
+  void nextTick(() => composerInput.value?.focus());
+}
+
+function resetConversationWorkspace() {
+  closeStream();
+  activeConversationId.value = "";
+  messages.value = [];
+  activeAssistantMessageId.value = "";
+  draft.value = sampleTask;
+  baselineState.value = undefined;
 }
 
 function updateActiveAssistant(update: (message: ConversationMessage) => ConversationMessage) {
@@ -207,6 +238,20 @@ function selectLatestAssistantMessage(session: ConversationSession) {
   return [...session.messages].reverse().find((message) => message.role === "assistant")?.id ?? "";
 }
 
+function normalizeRestoredMessages(session: ConversationSession) {
+  return session.messages.map((message) => {
+    if (message.role !== "assistant" || message.status !== "running") {
+      return message;
+    }
+
+    return {
+      ...message,
+      status: "failed" as const,
+      errorMessage: "执行连接已断开，请重试上一条任务。",
+    };
+  });
+}
+
 async function loadConversation(conversationId: string) {
   try {
     conversationError.value = "";
@@ -220,7 +265,7 @@ async function loadConversation(conversationId: string) {
 
     const session = await response.json() as ConversationSession;
     activeConversationId.value = session.id;
-    messages.value = session.messages;
+    messages.value = normalizeRestoredMessages(session);
     activeAssistantMessageId.value = selectLatestAssistantMessage(session);
     focusedTask.value = [...session.messages].reverse().find((message) => message.role === "user")?.content ?? sampleTask;
     draft.value = "";
@@ -234,6 +279,25 @@ async function loadConversation(conversationId: string) {
 async function createNewConversation() {
   try {
     conversationError.value = "";
+
+    if (isBusy.value) {
+      conversationError.value = "当前任务仍在执行，请完成或取消后再新建会话。";
+      return;
+    }
+
+    if (activeConversationId.value && messages.value.length === 0) {
+      focusComposer();
+      return;
+    }
+
+    const reusableEmptyConversation = conversations.value.find((conversation) => conversation.messageCount === 0);
+
+    if (reusableEmptyConversation) {
+      await loadConversation(reusableEmptyConversation.id);
+      focusComposer();
+      return;
+    }
+
     closeStream();
 
     const response = await fetch(`${API_BASE_URL}/agent/conversations`, {
@@ -255,8 +319,62 @@ async function createNewConversation() {
     draft.value = sampleTask;
     baselineState.value = undefined;
     await refreshConversations();
+    focusComposer();
   } catch (error) {
     conversationError.value = error instanceof Error ? error.message : "会话创建失败";
+  }
+}
+
+function isConversationDeleting(conversationId: string) {
+  return deletingConversationId.value === conversationId;
+}
+
+function getConversationDeleteDisabled(conversation: ConversationSessionSummary) {
+  return Boolean(conversation.activeRunId) || isConversationDeleting(conversation.id) || (
+    conversation.id === activeConversationId.value && isBusy.value
+  );
+}
+
+async function deleteConversationItem(conversationId: string) {
+  if (deletingConversationId.value) {
+    return;
+  }
+
+  try {
+    conversationError.value = "";
+    deletingConversationId.value = conversationId;
+
+    const response = await fetch(`${API_BASE_URL}/agent/conversations/${conversationId}`, {
+      method: "DELETE",
+    });
+
+    if (response.status === 409) {
+      throw new Error("该会话仍有任务在执行，请完成或取消后再删除。");
+    }
+
+    if (!response.ok) {
+      throw new Error(`Conversation delete request failed: ${response.status}`);
+    }
+
+    const wasActiveConversation = activeConversationId.value === conversationId;
+    await refreshConversations();
+
+    if (!wasActiveConversation) {
+      return;
+    }
+
+    const nextConversation = conversations.value[0];
+
+    if (nextConversation) {
+      await loadConversation(nextConversation.id);
+    } else {
+      resetConversationWorkspace();
+      focusComposer();
+    }
+  } catch (error) {
+    conversationError.value = error instanceof Error ? error.message : "会话删除失败";
+  } finally {
+    deletingConversationId.value = "";
   }
 }
 
@@ -346,6 +464,50 @@ async function resolveApproval(action: "approve" | "reject", messageId: string) 
   } finally {
     resolvingApproval.value = false;
   }
+}
+
+async function cancelActiveRun() {
+  const runId = activeRun.value?.id;
+
+  if (!runId || cancellingRun.value) {
+    return;
+  }
+
+  try {
+    cancellingRun.value = true;
+    const response = await fetch(`${API_BASE_URL}/agent/runs/${runId}/cancel`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        reason: "用户取消执行",
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Run cancel request failed: ${response.status}`);
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "取消执行失败";
+    updateActiveAssistant((message) => ({
+      ...message,
+      errorMessage,
+    }));
+  } finally {
+    cancellingRun.value = false;
+  }
+}
+
+async function retryLastUserMessage() {
+  const lastUserMessage = [...messages.value].reverse().find((message) => message.role === "user");
+
+  if (!lastUserMessage || isBusy.value) {
+    return;
+  }
+
+  draft.value = lastUserMessage.content;
+  await sendMessage();
 }
 
 async function resetSandbox() {
@@ -463,6 +625,22 @@ async function applyRunEvent(event: Event) {
     return;
   }
 
+  if (payload.kind === "run_cancelled") {
+    updateActiveAssistant((message) => ({
+      ...message,
+      run: payload.run,
+      status: payload.run.status,
+      steps: payload.run.steps,
+      content: "Agent 执行已取消。",
+      errorMessage: "本次执行已取消，可重试上一条任务。",
+    }));
+    closeStream();
+    await refreshSandboxState();
+    await refreshConversations();
+    scrollConversationToBottom();
+    return;
+  }
+
   updateActiveAssistant((message) => ({
     ...message,
     status: "failed",
@@ -516,6 +694,7 @@ async function sendMessage() {
   eventSource.addEventListener("approval_required", applyRunEvent);
   eventSource.addEventListener("approval_resolved", applyRunEvent);
   eventSource.addEventListener("run_completed", applyRunEvent);
+  eventSource.addEventListener("run_cancelled", applyRunEvent);
   eventSource.addEventListener("error", (event) => {
     const payload = readEvent(event);
     const errorMessage = payload?.kind === "error" ? payload.message : "执行流连接中断，请确认后端服务是否正在运行。";
@@ -585,19 +764,29 @@ onBeforeUnmount(closeStream);
         <div v-else-if="conversations.length === 0" class="empty-state compact">暂无会话</div>
 
         <div v-else class="history-list">
-          <button
+          <div
             v-for="conversation in conversations"
             :key="conversation.id"
             class="history-item"
             :class="{ active: conversation.id === activeConversationId }"
-            type="button"
-            @click="loadConversation(conversation.id)"
           >
-            <span class="history-task">{{ conversation.title }}</span>
-            <span class="history-meta">
-              {{ formatRunTime(conversation.updatedAt) }} · {{ conversation.messageCount }} messages
-            </span>
-          </button>
+            <button class="history-select" type="button" @click="loadConversation(conversation.id)">
+              <span class="history-task">{{ conversation.title }}</span>
+              <span class="history-meta">
+                {{ formatRunTime(conversation.updatedAt) }} · {{ conversation.messageCount }} messages
+              </span>
+            </button>
+            <button
+              class="ghost-button history-delete danger"
+              type="button"
+              :aria-label="`删除会话：${conversation.title}`"
+              :disabled="getConversationDeleteDisabled(conversation)"
+              :title="conversation.activeRunId ? '任务执行中，暂不能删除' : '删除会话'"
+              @click="deleteConversationItem(conversation.id)"
+            >
+              {{ isConversationDeleting(conversation.id) ? "..." : "删" }}
+            </button>
+          </div>
         </div>
       </section>
     </section>
@@ -626,6 +815,13 @@ onBeforeUnmount(closeStream);
             <div class="message-meta">
               <span>{{ message.role === "user" ? "你" : "Agent" }}</span>
               <span>{{ formatRunTime(message.createdAt) }}</span>
+              <span
+                v-if="message.role === 'assistant'"
+                class="message-status"
+                :class="`status-${message.status ?? 'idle'}`"
+              >
+                {{ getStatusLabel(message.status) }}
+              </span>
             </div>
             <p class="message-content">{{ message.content }}</p>
 
@@ -677,14 +873,28 @@ onBeforeUnmount(closeStream);
 
         <div class="composer">
           <textarea
+            ref="composerInput"
             v-model="draft"
             aria-label="任务输入"
             placeholder="输入下一条任务，例如：处理工单 T-1001..."
             @keydown="handleComposerKeydown"
           />
-          <button type="button" :disabled="isBusy || !draft.trim()" @click="sendMessage">
-            {{ isRunning ? "执行中..." : status === "waiting_approval" ? "等待审批" : "发送" }}
-          </button>
+          <div class="composer-actions">
+            <button type="button" :disabled="isBusy || !draft.trim()" @click="sendMessage">
+              {{ isRunning ? "执行中..." : status === "waiting_approval" ? "等待审批" : "发送" }}
+            </button>
+            <button
+              class="ghost-button danger"
+              type="button"
+              :disabled="!isBusy || cancellingRun"
+              @click="cancelActiveRun"
+            >
+              {{ cancellingRun ? "取消中" : "取消" }}
+            </button>
+            <button class="ghost-button" type="button" :disabled="!canRetryLastTask" @click="retryLastUserMessage">
+              重试
+            </button>
+          </div>
         </div>
       </section>
 

@@ -72,6 +72,22 @@ export function getConversation(conversationId: string): ConversationSession | u
   return session ? cloneSession(session) : undefined;
 }
 
+/** 删除单个空闲会话；仍有活跃 run 的会话不删除，避免执行流和 UI 状态失去对应关系。 */
+export function deleteConversation(conversationId: string): "deleted" | "not_found" | "active_run" {
+  const session = sessions.get(conversationId);
+
+  if (!session) {
+    return "not_found";
+  }
+
+  if (session.activeRunId) {
+    return "active_run";
+  }
+
+  sessions.delete(conversationId);
+  return "deleted";
+}
+
 /** 新增或替换一条消息，避免 SSE 重连或前端乐观渲染导致重复 user/assistant 消息。 */
 export function upsertConversationMessage(conversationId: string, message: ConversationMessage) {
   const session = sessions.get(conversationId);
@@ -145,7 +161,10 @@ export function updateAssistantRunMessage(
     const stored = sessions.get(conversationId);
 
     if (stored) {
-      stored.activeRunId = patch.run.status === "completed" || patch.run.status === "failed" ? undefined : patch.run.id;
+      stored.activeRunId =
+        patch.run.status === "completed" || patch.run.status === "failed" || patch.run.status === "cancelled"
+          ? undefined
+          : patch.run.id;
       stored.updatedAt = now();
       sessions.set(stored.id, cloneSession(stored));
       return cloneSession(stored);

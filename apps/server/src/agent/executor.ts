@@ -9,6 +9,7 @@ import { buildPlanPrompt, buildToolCallingMessages } from "../llm/prompts.js";
 import type { LlmChatMessage, LlmToolCall } from "../llm/types.js";
 import { saveRun } from "../trace/runStore.js";
 import { isAgentToolName, listAgentTools, runTool, toolRegistry, type ToolName } from "../tools/toolRegistry.js";
+import { AgentRunCancelledError, clearRunCancel, throwIfRunCancelled } from "./runControl.js";
 
 const STEP_DELAY_MS = 250;
 const MAX_TOOL_LOOP_TURNS = 10;
@@ -233,6 +234,7 @@ async function* requestApprovalForTool(
   }
 
   const result = await decision;
+  throwIfRunCancelled(run);
   const resolvedApproval: ApprovalRequest = {
     ...approval,
     status: result.status,
@@ -261,12 +263,15 @@ async function* requestApprovalForTool(
 async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenerator<AgentRunEvent> {
   let stepIndex = 1;
 
+  throwIfRunCancelled(run);
   yield addStep(run, await buildPlanStep(run.task, stepIndex++));
+  throwIfRunCancelled(run);
 
   const tools = listAgentTools();
   const messages = buildToolCallingMessages(run.task);
 
   for (let turn = 1; turn <= MAX_TOOL_LOOP_TURNS; turn += 1) {
+    throwIfRunCancelled(run);
     const assistant = await measureStep(() =>
       generateChat({
         messages,
@@ -284,6 +289,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
 
     if (toolCalls.length > 0) {
       for (const toolCall of toolCalls) {
+        throwIfRunCancelled(run);
         if (!isAgentToolName(toolCall.name)) {
           throw new Error(`Tool is not available to agent: ${toolCall.name}`);
         }
@@ -301,12 +307,14 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
         const toolStep = await buildToolStep(stepIndex++, toolCall);
         messages.push(toolStep.toolMessage);
         yield addStep(run, toolStep.step);
+        throwIfRunCancelled(run);
       }
 
       continue;
     }
 
     if (assistant.value.message.content) {
+      throwIfRunCancelled(run);
       yield addStep(
         run,
         createStep({
@@ -342,11 +350,21 @@ export async function runAgentTask(task: string): Promise<AgentRun> {
     run.status = "completed";
     run.completedAt = new Date().toISOString();
     saveRun(run);
+    clearRunCancel(run.id);
     return run;
   } catch (error) {
+    if (error instanceof AgentRunCancelledError) {
+      run.status = "cancelled";
+      run.completedAt = new Date().toISOString();
+      saveRun(run);
+      clearRunCancel(run.id);
+      return run;
+    }
+
     run.status = "failed";
     run.completedAt = new Date().toISOString();
     saveRun(run);
+    clearRunCancel(run.id);
     throw error;
   }
 }
@@ -363,21 +381,37 @@ export async function* streamAgentTask(task: string): AsyncGenerator<AgentRunEve
   try {
     for await (const event of buildAgentEvents(run, "interactive")) {
       await wait(STEP_DELAY_MS);
+      throwIfRunCancelled(run);
       yield event;
     }
 
     run.status = "completed";
     run.completedAt = new Date().toISOString();
     saveRun(run);
+    clearRunCancel(run.id);
 
     yield {
       kind: "run_completed",
       run,
     };
   } catch (error) {
+    if (error instanceof AgentRunCancelledError) {
+      run.status = "cancelled";
+      run.completedAt = new Date().toISOString();
+      saveRun(run);
+      clearRunCancel(run.id);
+
+      yield {
+        kind: "run_cancelled",
+        run,
+      };
+      return;
+    }
+
     run.status = "failed";
     run.completedAt = new Date().toISOString();
     saveRun(run);
+    clearRunCancel(run.id);
     throw error;
   }
 }

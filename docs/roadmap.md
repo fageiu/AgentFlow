@@ -52,3 +52,11 @@
 - SSE execution persists user and assistant messages into the active conversation.
 - Frontend sidebar switches from run history to conversation list.
 - Users can create, switch, and continue conversations while run history remains an audit API.
+
+## Week 9
+
+- Run cancellation contract and cancel API.
+- Executor stops at step boundaries and emits `run_cancelled`.
+- Frontend cancel and retry controls in the conversation composer.
+- Restored conversations mark interrupted running messages as retryable.
+- Assistant messages show their own execution status.
