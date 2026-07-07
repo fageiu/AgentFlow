@@ -5,8 +5,16 @@ import type {
   ConversationSession,
   ConversationSessionSummary,
 } from "@agentflow/shared";
+import { readPersistentState, writePersistentState } from "../storage/persistentState.js";
 
 const sessions = new Map<string, ConversationSession>();
+
+for (const session of readPersistentState().conversations) {
+  const recovered = normalizeRecoveredSession(session);
+  sessions.set(recovered.id, cloneSession(recovered));
+}
+
+persistConversations();
 
 /** 生成内存会话和消息使用的短 id，方便前端调试时辨认来源。 */
 function createId(prefix: string) {
@@ -21,6 +29,50 @@ function now() {
 /** 深拷贝会话快照，避免调用方直接修改内存 store 中的对象引用。 */
 function cloneSession(session: ConversationSession): ConversationSession {
   return JSON.parse(JSON.stringify(session)) as ConversationSession;
+}
+
+function persistConversations() {
+  const state = readPersistentState();
+  writePersistentState({
+    ...state,
+    conversations: [...sessions.values()].map(cloneSession),
+  });
+}
+
+/** 服务重启后旧执行流无法继续，恢复会话时把未完成消息标记成可重试的中断状态。 */
+function normalizeRecoveredSession(session: ConversationSession): ConversationSession {
+  const recovered = cloneSession(session);
+
+  recovered.messages = recovered.messages.map((message) => {
+    if (message.role !== "assistant" || (message.status !== "running" && message.status !== "waiting_approval")) {
+      return message;
+    }
+
+    return {
+      ...message,
+      content: "Agent 执行已中断。",
+      errorMessage: "后端服务曾重启，本次执行无法继续，可重试上一条任务。",
+      status: "failed",
+      run: message.run
+        ? {
+            ...message.run,
+            status: "failed",
+            completedAt: message.run.completedAt ?? new Date().toISOString(),
+            steps: message.run.steps.map((step) => ({
+              ...step,
+              status: step.status === "running" ? "failed" : step.status,
+            })),
+          }
+        : message.run,
+      steps: message.steps?.map((step) => ({
+        ...step,
+        status: step.status === "running" ? "failed" : step.status,
+      })),
+    };
+  });
+  recovered.activeRunId = undefined;
+
+  return recovered;
 }
 
 /** 将完整会话压缩成侧边栏摘要，避免列表接口一次返回完整 trace。 */
@@ -56,6 +108,7 @@ export function createConversation(title = "新会话"): ConversationSession {
   };
 
   sessions.set(session.id, cloneSession(session));
+  persistConversations();
   return cloneSession(session);
 }
 
@@ -85,6 +138,7 @@ export function deleteConversation(conversationId: string): "deleted" | "not_fou
   }
 
   sessions.delete(conversationId);
+  persistConversations();
   return "deleted";
 }
 
@@ -106,6 +160,7 @@ export function upsertConversationMessage(conversationId: string, message: Conve
   }
 
   sessions.set(session.id, cloneSession(session));
+  persistConversations();
   return cloneSession(session);
 }
 
@@ -137,6 +192,7 @@ export function updateConversationMessage(
 
   session.updatedAt = now();
   sessions.set(session.id, cloneSession(session));
+  persistConversations();
   return cloneSession(session);
 }
 
@@ -167,6 +223,7 @@ export function updateAssistantRunMessage(
           : patch.run.id;
       stored.updatedAt = now();
       sessions.set(stored.id, cloneSession(stored));
+      persistConversations();
       return cloneSession(stored);
     }
   }
@@ -177,4 +234,5 @@ export function updateAssistantRunMessage(
 /** 清空进程内会话数据，方便本地演示或测试时重置。 */
 export function clearConversations() {
   sessions.clear();
+  persistConversations();
 }

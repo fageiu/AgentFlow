@@ -21,6 +21,7 @@
 - `apps/server/src/llm/*`：LLM 配置、Prompt 和 Provider 封装。
 - `apps/server/src/trace/runStore.ts`：AgentRun trace 历史的内存存储与摘要查询。
 - `apps/server/src/conversation/conversationStore.ts`：可恢复会话的内存存储，负责会话摘要、消息快照和消息内嵌 trace。
+- `apps/server/src/storage/persistentState.ts`：本地 JSON 持久化边界，负责读写 `.agentflow-data/server-state.json`。
 - `apps/server/src/tools/toolRegistry.ts`：业务工具注册、参数校验、风险等级描述。
 - `packages/shared/src/index.ts`：前后端共享类型和事件契约。
 
@@ -56,3 +57,4 @@
 - 历史列表接口只返回 `AgentRunSummary`，完整步骤明细通过单条详情接口按需读取。
 - 会话列表接口只返回 `ConversationSessionSummary`，完整消息和嵌入式 trace 通过会话详情接口读取；`runStore` 仍作为审计 trace，`conversationStore` 负责恢复工作台上下文。
 - 取消执行通过 `runControl.ts` 记录 run 级别取消标记，`executor.ts` 负责把取消转换为 `cancelled` 状态和 `run_cancelled` SSE 事件，路由层不直接改写执行流程。
+- Week 10 起，`runStore`、`conversationStore` 和 `approvalStore` 的内存 Map 会同步写入本地 JSON；重启后无法继续的 `running`/`waiting_approval` run 必须降级为可重试的中断状态。

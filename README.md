@@ -107,9 +107,15 @@ SSE 执行接口：http://127.0.0.1:3001/agent/run/stream?task=处理工单%20T-
 Trace 历史接口：http://127.0.0.1:3001/agent/runs
 ```
 
+## 本地持久化
+
+服务端会把会话、运行历史和当前进程内等待审批元数据写入 `.agentflow-data/server-state.json`。可以通过 `AGENTFLOW_DATA_DIR` 指定其他目录。
+
+如果服务重启时发现旧 run 仍处于 `running` 或 `waiting_approval`，会恢复为失败/中断快照，前端可通过上一条用户任务重试。等待审批的 executor 无法跨进程恢复，因此重启后会清理旧 pending approval，避免误批准一个无法继续的执行流。
+
 ## 当前阶段
 
-当前已完成到 Week 9：
+当前已完成到 Week 10：
 
 - Week 1-2：项目骨架、沙箱数据和工具注册。
 - Week 3-4：SSE 时间线、Trace 历史、沙箱状态面板。
@@ -118,3 +124,4 @@ Trace 历史接口：http://127.0.0.1:3001/agent/runs
 - Week 7：单会话多轮消息流和嵌入式 run trace。
 - Week 8：可恢复多会话工作台，会话列表支持创建、切换和恢复消息 trace。
 - Week 9：运行控制与断线恢复，支持取消执行、重试上一条任务、中断消息提示和会话删除保护。
+- Week 10：本地 JSON 持久化，支持服务重启后恢复会话和运行历史，并对未完成执行做中断降级。

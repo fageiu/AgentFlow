@@ -60,3 +60,11 @@
 - Frontend cancel and retry controls in the conversation composer.
 - Restored conversations mark interrupted running messages as retryable.
 - Assistant messages show their own execution status.
+
+## Week 10
+
+- Local JSON persistence for conversations, run history, and current-process pending approval metadata.
+- Store APIs keep their existing call semantics while writing through `.agentflow-data/server-state.json`.
+- Server startup reloads conversation and run snapshots from disk.
+- Recovered `running` or `waiting_approval` runs are downgraded to failed/interrupted snapshots because executor promises cannot survive process restart.
+- Stale pending approval metadata is cleared on restart to avoid approving a request that no executor can resume.

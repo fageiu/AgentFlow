@@ -1,4 +1,5 @@
 import type { ApprovalRequest } from "@agentflow/shared";
+import { readPersistentState, writePersistentState } from "../storage/persistentState.js";
 
 export type ApprovalDecision = {
   status: "approved" | "rejected";
@@ -11,6 +12,17 @@ type PendingApproval = {
 };
 
 const pendingApprovals = new Map<string, PendingApproval>();
+
+// 重启后等待审批的 executor Promise 已不存在，清掉旧 pending，避免用户批准一个无法继续的请求。
+persistPendingApprovals();
+
+function persistPendingApprovals() {
+  const state = readPersistentState();
+  writePersistentState({
+    ...state,
+    pendingApprovals: [...pendingApprovals.values()].map((item) => item.approval),
+  });
+}
 
 /** 创建审批请求，并返回一个 Promise 让 executor 可以暂停等待用户决策。 */
 export function createApprovalRequest(input: Omit<ApprovalRequest, "id" | "status" | "createdAt">) {
@@ -30,6 +42,7 @@ export function createApprovalRequest(input: Omit<ApprovalRequest, "id" | "statu
     approval,
     resolve: resolveDecision,
   });
+  persistPendingApprovals();
 
   return {
     approval,
@@ -58,6 +71,7 @@ export function resolveApprovalForRun(runId: string, decision: ApprovalDecision)
   };
 
   pendingApprovals.delete(entry.approval.id);
+  persistPendingApprovals();
   entry.resolve(decision);
 
   return resolved;

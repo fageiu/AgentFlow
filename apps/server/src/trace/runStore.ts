@@ -1,15 +1,46 @@
 import type { AgentRun, AgentRunSummary } from "@agentflow/shared";
+import { readPersistentState, writePersistentState } from "../storage/persistentState.js";
 
 const runs = new Map<string, AgentRun>();
+
+for (const run of readPersistentState().runs) {
+  runs.set(run.id, normalizeRecoveredRun(run));
+}
 
 /** 深拷贝运行快照，避免外部调用方修改仓库里保存的 trace。 */
 function cloneRun(run: AgentRun): AgentRun {
   return JSON.parse(JSON.stringify(run)) as AgentRun;
 }
 
-/** 保存一次已完成或失败的 Agent 运行记录，当前阶段先使用进程内存作为轻量持久层。 */
+function persistRuns() {
+  const state = readPersistentState();
+  writePersistentState({
+    ...state,
+    runs: [...runs.values()].map(cloneRun),
+  });
+}
+
+/** 服务重启后没有 executor 继续推进旧 run，因此将执行中快照降级为可审计的失败记录。 */
+function normalizeRecoveredRun(run: AgentRun): AgentRun {
+  if (run.status !== "running" && run.status !== "waiting_approval") {
+    return cloneRun(run);
+  }
+
+  return {
+    ...cloneRun(run),
+    status: "failed",
+    completedAt: run.completedAt ?? new Date().toISOString(),
+    steps: run.steps.map((step) => ({
+      ...step,
+      status: step.status === "running" ? "failed" : step.status,
+    })),
+  };
+}
+
+/** 保存一次 Agent 运行记录，并立即写入本地持久化快照。 */
 export function saveRun(run: AgentRun) {
   runs.set(run.id, cloneRun(run));
+  persistRuns();
 }
 
 /** 按 runId 读取完整 trace 明细，前端点击历史记录时会调用这个方法对应的接口。 */
@@ -35,4 +66,5 @@ export function listRuns(): AgentRunSummary[] {
 /** 清空当前进程内的运行历史，主要用于本地 Demo 反复演示。 */
 export function clearRuns() {
   runs.clear();
+  persistRuns();
 }
