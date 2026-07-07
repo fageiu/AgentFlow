@@ -1,4 +1,5 @@
 import { getLlmConfig } from "./config.js";
+import type { LlmTokenUsage } from "@agentflow/shared";
 import type {
   GenerateChatInput,
   GenerateChatResult,
@@ -25,6 +26,37 @@ interface ChatCompletionResponse {
       tool_calls?: OpenAiToolCall[];
     };
   }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+}
+
+function estimateTokens(text: string) {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+function createTokenUsage(promptText: string, completionText: string): LlmTokenUsage {
+  const promptTokens = estimateTokens(promptText);
+  const completionTokens = estimateTokens(completionText);
+
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens: promptTokens + completionTokens,
+  };
+}
+
+function parseUsage(data: ChatCompletionResponse, fallback: LlmTokenUsage): LlmTokenUsage {
+  const promptTokens = data.usage?.prompt_tokens ?? fallback.promptTokens;
+  const completionTokens = data.usage?.completion_tokens ?? fallback.completionTokens;
+
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens: data.usage?.total_tokens ?? promptTokens + completionTokens,
+  };
 }
 
 /** 生成 Mock 文本，保证没有 API Key 时项目仍可完整演示。 */
@@ -44,11 +76,14 @@ function buildMockText(input: GenerateTextInput) {
 
 /** 将 Mock 文本包装成统一的 GenerateTextResult，方便 executor 无差别消费。 */
 function createMockTextResult(input: GenerateTextInput, model = "mock-llm"): GenerateTextResult {
+  const text = buildMockText(input);
+
   return {
-    text: buildMockText(input),
+    text,
     provider: "mock",
     model,
     isMock: true,
+    tokenUsage: createTokenUsage(`${input.system}\n${input.user}`, text),
   };
 }
 
@@ -145,11 +180,15 @@ function buildMockChatMessage(input: GenerateChatInput, errorMessage?: string): 
 }
 
 function createMockChatResult(input: GenerateChatInput, model = "mock-llm", errorMessage?: string): GenerateChatResult {
+  const message = buildMockChatMessage(input, errorMessage);
+  const completionText = JSON.stringify(message);
+
   return {
-    message: buildMockChatMessage(input, errorMessage),
+    message,
     provider: "mock",
     model,
     isMock: true,
+    tokenUsage: createTokenUsage(JSON.stringify(input.messages), completionText),
   };
 }
 
@@ -270,6 +309,7 @@ export async function generateText(input: GenerateTextInput): Promise<GenerateTe
       provider: "openai-compatible",
       model: config.model,
       isMock: false,
+      tokenUsage: parseUsage(data, createTokenUsage(`${input.system}\n${input.user}`, text)),
     };
   } catch (error) {
     if (!config.fallbackOnError) {
@@ -281,6 +321,7 @@ export async function generateText(input: GenerateTextInput): Promise<GenerateTe
     return {
       ...result,
       text: `${result.text}\n\n[Mock fallback: ${message}]`,
+      tokenUsage: createTokenUsage(`${input.system}\n${input.user}`, `${result.text}\n\n[Mock fallback: ${message}]`),
     };
   }
 }
@@ -314,12 +355,14 @@ export async function generateChat(input: GenerateChatInput): Promise<GenerateCh
     }
 
     const data = (await response.json()) as ChatCompletionResponse;
+    const message = parseAssistantMessage(data);
 
     return {
-      message: parseAssistantMessage(data),
+      message,
       provider: "openai-compatible",
       model: config.model,
       isMock: false,
+      tokenUsage: parseUsage(data, createTokenUsage(JSON.stringify(input.messages), JSON.stringify(message))),
     };
   } catch (error) {
     if (!config.fallbackOnError) {

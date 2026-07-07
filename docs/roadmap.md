@@ -68,3 +68,29 @@
 - Server startup reloads conversation and run snapshots from disk.
 - Recovered `running` or `waiting_approval` runs are downgraded to failed/interrupted snapshots because executor promises cannot survive process restart.
 - Stale pending approval metadata is cleared on restart to avoid approving a request that no executor can resume.
+
+## Week 11
+
+- Evaluation case contract for repeatable Agent regression tasks.
+- Nine built-in deterministic cases covering VIP refund approval, non-refund invoice handling, invalid ticket safety, lowercase ticket normalization, and refund idempotency.
+- Batch evaluation runner that resets sandbox state per case and reuses the normal Agent execution path.
+- Rule-based scorer checks tools, approval behavior, run status, and final sandbox state.
+- Evaluation APIs for cases, running suites, listing history, and reading run details.
+- Frontend evaluation panel with case list, pass/fail summary, and assertion-level results.
+
+## Week 12
+
+- Evaluation cases are grouped by capability: refund flow, approval boundary, knowledge retrieval, safety, and idempotency.
+- Evaluation results include assertion diagnosis, tool traces, failed assertion counts, and approval behavior snapshots.
+- Each evaluation run compares against the previous completed run and marks cases as regressed, recovered, unchanged, or new.
+- Frontend evaluation panel supports group filtering, running a single capability group, recent-run selection, regression summary, and per-case detail inspection.
+- Persisted Week 11 evaluation results are normalized on load so older local data remains readable after the Week 12 contract expansion.
+
+## Week 13
+
+- Evaluation set expanded to twelve built-in cases, reaching the original 10-20 golden task target range.
+- Agent runs collect LLM call count, tool call count, model names, and token usage from provider responses when available.
+- Mock and fallback LLM calls provide estimated token usage so local demos still show complete evaluation metrics.
+- Evaluation summaries report success rate inputs, average duration, average tool calls, total tool calls, average tokens, total tokens, models, and failure reasons.
+- Evaluation runs persist provider, model, prompt version, and mock/real mode, enabling comparison across different model or prompt configurations.
+- Frontend evaluation panel shows model/prompt configuration, token metrics, average tool calls, and top failure reasons.

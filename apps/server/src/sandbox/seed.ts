@@ -79,6 +79,12 @@ function createInitialPolicies(): Policy[] {
       title: "高风险操作审批规则",
       content: "退款、关闭高优先级工单、修改客户等级等操作必须进入人工审批流程。",
     },
+    {
+      id: "P-invoice-001",
+      keyword: "发票",
+      title: "发票咨询处理规则",
+      content: "补开发票属于普通客服咨询，应核对客户和订单信息后记录处理意见，不应创建退款或进入高风险审批。",
+    },
   ];
 }
 

@@ -14,6 +14,9 @@ import {
   updateAssistantRunMessage,
   upsertConversationMessage,
 } from "./conversation/conversationStore.js";
+import { listEvaluationCases } from "./eval/evaluationCases.js";
+import { runEvaluationSuite } from "./eval/evaluationRunner.js";
+import { getEvaluationRun, listEvaluationRuns } from "./eval/evaluationStore.js";
 import { clearRuns, getRun, listRuns } from "./trace/runStore.js";
 import { getSandboxState, resetSandboxState } from "./tools/sandboxTools.js";
 
@@ -53,6 +56,14 @@ interface CancelRunBody {
   reason?: string;
 }
 
+interface RunEvaluationBody {
+  caseIds?: string[];
+}
+
+interface EvaluationRunParams {
+  evaluationRunId: string;
+}
+
 const app = Fastify({ logger: true });
 
 await app.register(cors, {
@@ -67,6 +78,26 @@ app.get("/sandbox/state", async () => getSandboxState());
 
 /** 沙箱重置接口，用于反复演示时恢复初始工单、订单和退款状态。 */
 app.post("/sandbox/reset", async () => resetSandboxState());
+
+/** 评测用例列表接口，前端用它展示当前内置回归集。 */
+app.get("/eval/cases", async () => listEvaluationCases());
+
+/** 评测运行历史接口，返回最近批量评测的完整结果快照。 */
+app.get("/eval/runs", async () => listEvaluationRuns());
+
+/** 触发一次批量评测；可传 caseIds 只跑部分用例，默认执行全部内置用例。 */
+app.post<{ Body: RunEvaluationBody }>("/eval/runs", async (request) => runEvaluationSuite(request.body?.caseIds));
+
+/** 单次评测详情接口，便于后续从列表跳转到完整断言结果。 */
+app.get<{ Params: EvaluationRunParams }>("/eval/runs/:evaluationRunId", async (request, reply) => {
+  const evaluationRun = getEvaluationRun(request.params.evaluationRunId);
+
+  if (!evaluationRun) {
+    return reply.code(404).send({ message: "Evaluation run not found." });
+  }
+
+  return evaluationRun;
+});
 
 /** 运行历史摘要接口，前端侧边栏用它展示最近执行过的 trace。 */
 app.get("/agent/runs", async () => listRuns());

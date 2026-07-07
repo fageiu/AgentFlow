@@ -3,6 +3,19 @@ export type AgentStepType = "plan" | "tool_call" | "observation" | "approval" | 
 
 export type ApprovalStatus = "pending" | "approved" | "rejected";
 
+export interface LlmTokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export interface AgentRunMetrics {
+  llmCallCount: number;
+  toolCallCount: number;
+  modelNames: string[];
+  tokenUsage: LlmTokenUsage;
+}
+
 /** 高风险工具调用的人工审批请求，前后端通过它共享审批状态。 */
 export interface ApprovalRequest {
   id: string;
@@ -25,6 +38,8 @@ export interface AgentStep {
   detail: string;
   durationMs?: number;
   toolName?: string;
+  modelName?: string;
+  tokenUsage?: LlmTokenUsage;
   status?: "running" | "completed" | "failed" | "cancelled";
   approvalRequest?: ApprovalRequest;
 }
@@ -37,6 +52,7 @@ export interface AgentRun {
   steps: AgentStep[];
   createdAt: string;
   completedAt?: string;
+  metrics?: AgentRunMetrics;
 }
 
 /** 历史运行列表使用的轻量摘要，避免列表接口一次性传回完整 trace 明细。 */
@@ -184,4 +200,144 @@ export interface SandboxState {
   orders: Order[];
   policies: Policy[];
   refunds: Refund[];
+}
+
+export type EvaluationCaseGroup = "refund" | "approval" | "knowledge" | "safety" | "idempotency";
+
+export type EvaluationCaseStatus = "passed" | "failed" | "error";
+
+export type EvaluationRegressionStatus = "new" | "unchanged_passed" | "unchanged_failed" | "regressed" | "recovered";
+
+export interface EvaluationExpectations {
+  requiredTools?: string[];
+  forbiddenTools?: string[];
+  toolCallCounts?: Array<{
+    toolName: string;
+    count: number;
+  }>;
+  requiresApproval?: boolean;
+  runStatus?: AgentRun["status"];
+  errorMessageIncludes?: string[];
+  finalMessageIncludes?: string[];
+  ticketStatus?: {
+    ticketId: string;
+    status: TicketStatus;
+  };
+  orderRefundStatus?: {
+    orderId: string;
+    status: RefundStatus;
+  };
+  refundCount?: {
+    orderId: string;
+    count: number;
+  };
+  totalRefundCount?: number;
+}
+
+/** 评测用例描述一次可重复执行的 Agent 任务和 deterministic judge 断言。 */
+export interface EvaluationCase {
+  id: string;
+  group: EvaluationCaseGroup;
+  groupLabel: string;
+  title: string;
+  description: string;
+  task: string;
+  repeat?: number;
+  expectations: EvaluationExpectations;
+}
+
+export interface EvaluationAssertionResult {
+  id: string;
+  label: string;
+  passed: boolean;
+  expected: string;
+  actual: string;
+  diagnosis: string;
+}
+
+export interface EvaluationCaseResult {
+  caseId: string;
+  group: EvaluationCaseGroup;
+  groupLabel: string;
+  title: string;
+  task: string;
+  status: EvaluationCaseStatus;
+  runId?: string;
+  runStatus?: AgentRun["status"];
+  durationMs: number;
+  assertions: EvaluationAssertionResult[];
+  failedAssertionCount: number;
+  toolNames: string[];
+  executedToolNames: string[];
+  toolCallCount: number;
+  tokenUsage: LlmTokenUsage;
+  modelNames: string[];
+  approvalRequired: boolean;
+  previousStatus?: EvaluationCaseStatus;
+  regressionStatus: EvaluationRegressionStatus;
+  errorMessage?: string;
+}
+
+export interface EvaluationGroupSummary {
+  group: EvaluationCaseGroup;
+  label: string;
+  total: number;
+  passed: number;
+  failed: number;
+  error: number;
+}
+
+export interface EvaluationRunSummary {
+  total: number;
+  passed: number;
+  failed: number;
+  error: number;
+  durationMs: number;
+  averageDurationMs: number;
+  averageToolCallCount: number;
+  totalToolCallCount: number;
+  averageTokenCount: number;
+  totalTokenCount: number;
+  modelNames: string[];
+  failureReasons: string[];
+  regressed: number;
+  recovered: number;
+  unchanged: number;
+  newCases: number;
+}
+
+export interface EvaluationRegressionItem {
+  caseId: string;
+  title: string;
+  previousStatus?: EvaluationCaseStatus;
+  currentStatus: EvaluationCaseStatus;
+  regressionStatus: EvaluationRegressionStatus;
+}
+
+export interface EvaluationRegressionSummary {
+  comparedWithRunId?: string;
+  regressed: EvaluationRegressionItem[];
+  recovered: EvaluationRegressionItem[];
+  unchanged: EvaluationRegressionItem[];
+  newCases: EvaluationRegressionItem[];
+}
+
+export interface EvaluationRunConfig {
+  provider: string;
+  model: string;
+  promptVersion: string;
+  mock: boolean;
+}
+
+/** 一次批量评测运行，包含所有 case 的评分结果和可追溯 runId。 */
+export interface EvaluationRun {
+  id: string;
+  status: "running" | "completed" | "failed";
+  createdAt: string;
+  completedAt?: string;
+  config: EvaluationRunConfig;
+  summary: EvaluationRunSummary;
+  groupSummaries: EvaluationGroupSummary[];
+  regression: EvaluationRegressionSummary;
+  results: EvaluationCaseResult[];
 }

@@ -1,3 +1,5 @@
+import type { LlmTokenUsage } from "@agentflow/shared";
+
 /** 当前支持的 LLM Provider 类型。 */
 export type LlmProvider = "mock" | "openai-compatible";
 
@@ -57,6 +59,7 @@ export interface GenerateTextResult {
   provider: LlmProvider;
   model: string;
   isMock: boolean;
+  tokenUsage: LlmTokenUsage;
 }
 
 export interface GenerateChatResult {
@@ -67,6 +70,7 @@ export interface GenerateChatResult {
   provider: LlmProvider;
   model: string;
   isMock: boolean;
+  tokenUsage: LlmTokenUsage;
 }
 
 /** 最终结论 Prompt 的上下文入参，由 executor 汇总工具结果后传入。 */

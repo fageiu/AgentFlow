@@ -1,4 +1,12 @@
-import type { AgentRun, AgentRunEvent, AgentStep, AgentStepType, ApprovalRequest } from "@agentflow/shared";
+import type {
+  AgentRun,
+  AgentRunEvent,
+  AgentRunMetrics,
+  AgentStep,
+  AgentStepType,
+  ApprovalRequest,
+  LlmTokenUsage,
+} from "@agentflow/shared";
 import {
   createApprovalRequest,
   resolveApprovalForRun,
@@ -31,7 +39,52 @@ function createRun(task: string, status: AgentRun["status"], steps: AgentStep[] 
     status,
     steps,
     createdAt: new Date().toISOString(),
+    metrics: createEmptyRunMetrics(),
   };
+}
+
+function createEmptyTokenUsage(): LlmTokenUsage {
+  return {
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+  };
+}
+
+function createEmptyRunMetrics(): AgentRunMetrics {
+  return {
+    llmCallCount: 0,
+    toolCallCount: 0,
+    modelNames: [],
+    tokenUsage: createEmptyTokenUsage(),
+  };
+}
+
+function addTokenUsage(left: LlmTokenUsage, right: LlmTokenUsage): LlmTokenUsage {
+  return {
+    promptTokens: left.promptTokens + right.promptTokens,
+    completionTokens: left.completionTokens + right.completionTokens,
+    totalTokens: left.totalTokens + right.totalTokens,
+  };
+}
+
+/** 汇总 run 级 LLM 指标，评测系统会基于它统计 token、模型和平均调用成本。 */
+function recordLlmUsage(run: AgentRun, modelName: string, tokenUsage: LlmTokenUsage) {
+  const metrics = run.metrics ?? createEmptyRunMetrics();
+  metrics.llmCallCount += 1;
+  metrics.tokenUsage = addTokenUsage(metrics.tokenUsage, tokenUsage);
+
+  if (!metrics.modelNames.includes(modelName)) {
+    metrics.modelNames.push(modelName);
+  }
+
+  run.metrics = metrics;
+}
+
+function recordToolCall(run: AgentRun) {
+  const metrics = run.metrics ?? createEmptyRunMetrics();
+  metrics.toolCallCount += 1;
+  run.metrics = metrics;
 }
 
 /** 创建标准化 step，保证每个步骤都有稳定 id。 */
@@ -119,7 +172,7 @@ function addStep(run: AgentRun, step: AgentStep) {
 }
 
 /** 通过工具注册表执行模型请求的工具，并把结果包装成时间线 step。 */
-async function buildToolStep(index: number, toolCall: LlmToolCall) {
+async function buildToolStep(run: AgentRun, index: number, toolCall: LlmToolCall) {
   const toolName = toolCall.name;
 
   if (!isAgentToolName(toolName)) {
@@ -127,6 +180,7 @@ async function buildToolStep(index: number, toolCall: LlmToolCall) {
   }
 
   const measured = await measureStep(() => runTool(toolName, toolCall.arguments));
+  recordToolCall(run);
 
   return {
     output: measured.value.output,
@@ -160,6 +214,8 @@ async function buildPlanStep(task: string, index: number) {
     detail: plan.value.text,
     durationMs: plan.durationMs,
     toolName: plan.value.model,
+    modelName: plan.value.model,
+    tokenUsage: plan.value.tokenUsage,
     status: "completed",
   });
 }
@@ -264,7 +320,11 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
   let stepIndex = 1;
 
   throwIfRunCancelled(run);
-  yield addStep(run, await buildPlanStep(run.task, stepIndex++));
+  const planStep = await buildPlanStep(run.task, stepIndex++);
+  if (planStep.modelName && planStep.tokenUsage) {
+    recordLlmUsage(run, planStep.modelName, planStep.tokenUsage);
+  }
+  yield addStep(run, planStep);
   throwIfRunCancelled(run);
 
   const tools = listAgentTools();
@@ -279,6 +339,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
         temperature: 0.2,
       }),
     );
+    recordLlmUsage(run, assistant.value.model, assistant.value.tokenUsage);
     const toolCalls = assistant.value.message.toolCalls ?? [];
 
     messages.push({
@@ -304,7 +365,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
           }
         }
 
-        const toolStep = await buildToolStep(stepIndex++, toolCall);
+        const toolStep = await buildToolStep(run, stepIndex++, toolCall);
         messages.push(toolStep.toolMessage);
         yield addStep(run, toolStep.step);
         throwIfRunCancelled(run);
@@ -324,6 +385,8 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
           detail: assistant.value.message.content,
           durationMs: assistant.durationMs,
           toolName: assistant.value.model,
+          modelName: assistant.value.model,
+          tokenUsage: assistant.value.tokenUsage,
           status: "completed",
         }),
       );

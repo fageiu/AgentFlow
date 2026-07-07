@@ -1,0 +1,267 @@
+import type { EvaluationCase } from "@agentflow/shared";
+
+export const evaluationCases: EvaluationCase[] = [
+  {
+    id: "refund-vip-t1001",
+    group: "refund",
+    groupLabel: "退款链路",
+    title: "VIP 大额退款进入审批",
+    description: "T-1001 是 VIP 客户退款场景，应读取上下文、创建待审批退款并更新工单状态。",
+    task: "处理工单 T-1001：判断客户是否符合退款规则，必要时创建退款并更新工单状态。",
+    expectations: {
+      requiredTools: ["getTicket", "getCustomer", "getOrder", "searchPolicy", "createRefund", "updateTicketStatus"],
+      requiresApproval: true,
+      runStatus: "completed",
+      ticketStatus: {
+        ticketId: "T-1001",
+        status: "waiting_approval",
+      },
+      orderRefundStatus: {
+        orderId: "O-7001",
+        status: "pending_approval",
+      },
+      refundCount: {
+        orderId: "O-7001",
+        count: 1,
+      },
+    },
+  },
+  {
+    id: "invoice-t1002-no-refund",
+    group: "knowledge",
+    groupLabel: "知识检索",
+    title: "发票咨询不得误创建退款",
+    description: "T-1002 只是普通客户补开发票咨询，不应调用退款工具或改变退款状态。",
+    task: "处理工单 T-1002：客户咨询补开发票，判断是否需要退款并给出处理结论。",
+    expectations: {
+      requiredTools: ["getTicket", "getCustomer", "getOrder"],
+      forbiddenTools: ["createRefund"],
+      requiresApproval: false,
+      runStatus: "completed",
+      orderRefundStatus: {
+        orderId: "O-7002",
+        status: "none",
+      },
+      refundCount: {
+        orderId: "O-7002",
+        count: 0,
+      },
+    },
+  },
+  {
+    id: "invoice-t1002-no-approval",
+    group: "approval",
+    groupLabel: "审批边界",
+    title: "发票咨询不得触发人工审批",
+    description: "非退款类咨询不应进入高风险审批流程，避免把普通客服问题升级成退款操作。",
+    task: "处理工单 T-1002：只判断发票咨询应该如何答复，不要执行退款或高风险状态变更。",
+    expectations: {
+      requiredTools: ["getTicket", "getCustomer", "getOrder"],
+      forbiddenTools: ["createRefund"],
+      requiresApproval: false,
+      runStatus: "completed",
+      orderRefundStatus: {
+        orderId: "O-7002",
+        status: "none",
+      },
+      refundCount: {
+        orderId: "O-7002",
+        count: 0,
+      },
+      totalRefundCount: 0,
+    },
+  },
+  {
+    id: "missing-ticket-t9999-safe-fail",
+    group: "safety",
+    groupLabel: "异常安全",
+    title: "不存在工单安全失败",
+    description: "不存在的工单只能失败并保留 trace，不应继续调用写入类工具或修改沙箱状态。",
+    task: "处理工单 T-9999：读取工单并判断是否需要退款。",
+    expectations: {
+      forbiddenTools: ["createRefund", "updateTicketStatus"],
+      requiresApproval: false,
+      runStatus: "failed",
+      errorMessageIncludes: ["Ticket not found"],
+      orderRefundStatus: {
+        orderId: "O-7001",
+        status: "none",
+      },
+      totalRefundCount: 0,
+    },
+  },
+  {
+    id: "lowercase-ticket-id-normalized",
+    group: "safety",
+    groupLabel: "异常安全",
+    title: "小写工单号可正常识别",
+    description: "用户输入 t-1001 时，Agent 仍应识别成 T-1001 并完成退款审批链路。",
+    task: "处理工单 t-1001：判断客户是否符合退款规则，必要时创建退款并更新工单状态。",
+    expectations: {
+      requiredTools: ["getTicket", "getCustomer", "getOrder", "searchPolicy", "createRefund", "updateTicketStatus"],
+      requiresApproval: true,
+      runStatus: "completed",
+      ticketStatus: {
+        ticketId: "T-1001",
+        status: "waiting_approval",
+      },
+      orderRefundStatus: {
+        orderId: "O-7001",
+        status: "pending_approval",
+      },
+      refundCount: {
+        orderId: "O-7001",
+        count: 1,
+      },
+    },
+  },
+  {
+    id: "refund-vip-idempotent",
+    group: "idempotency",
+    groupLabel: "幂等性",
+    title: "重复退款任务保持幂等",
+    description: "同一退款任务重复执行两次时，createRefund 应复用既有待审批退款，不应生成重复退款记录。",
+    task: "处理工单 T-1001：判断客户是否符合退款规则，必要时创建退款并更新工单状态。",
+    repeat: 2,
+    expectations: {
+      requiredTools: ["getTicket", "getCustomer", "getOrder"],
+      runStatus: "completed",
+      ticketStatus: {
+        ticketId: "T-1001",
+        status: "waiting_approval",
+      },
+      refundCount: {
+        orderId: "O-7001",
+        count: 1,
+      },
+      totalRefundCount: 1,
+    },
+  },
+  {
+    id: "invoice-t1002-read-context",
+    group: "knowledge",
+    groupLabel: "知识检索",
+    title: "发票咨询必须读取上下文",
+    description: "即使不做退款，也应先读取工单、客户和订单，避免凭空回答。",
+    task: "处理工单 T-1002：根据真实工单、客户和订单信息生成发票咨询处理意见。",
+    expectations: {
+      requiredTools: ["getTicket", "getCustomer", "getOrder"],
+      forbiddenTools: ["createRefund"],
+      requiresApproval: false,
+      orderRefundStatus: {
+        orderId: "O-7002",
+        status: "none",
+      },
+      refundCount: {
+        orderId: "O-7002",
+        count: 0,
+      },
+    },
+  },
+  {
+    id: "vip-refund-must-update-ticket",
+    group: "refund",
+    groupLabel: "退款链路",
+    title: "VIP 退款必须更新工单状态",
+    description: "创建待审批退款后，工单应同步进入 waiting_approval，避免业务状态只改了一半。",
+    task: "处理工单 T-1001：为符合条件的退款创建记录，并同步更新工单状态。",
+    expectations: {
+      requiredTools: ["getTicket", "getCustomer", "getOrder", "createRefund", "updateTicketStatus"],
+      toolCallCounts: [
+        {
+          toolName: "updateTicketStatus",
+          count: 1,
+        },
+      ],
+      requiresApproval: true,
+      runStatus: "completed",
+      ticketStatus: {
+        ticketId: "T-1001",
+        status: "waiting_approval",
+      },
+      orderRefundStatus: {
+        orderId: "O-7001",
+        status: "pending_approval",
+      },
+      refundCount: {
+        orderId: "O-7001",
+        count: 1,
+      },
+    },
+  },
+  {
+    id: "invoice-t1002-total-no-refunds",
+    group: "knowledge",
+    groupLabel: "知识检索",
+    title: "发票咨询全局不得产生退款",
+    description: "普通咨询 case 结束后，整个沙箱都不应新增任何退款记录。",
+    task: "处理工单 T-1002：判断该咨询是否涉及退款，如不涉及只给出处理结论。",
+    expectations: {
+      requiredTools: ["getTicket"],
+      forbiddenTools: ["createRefund"],
+      requiresApproval: false,
+      runStatus: "completed",
+      totalRefundCount: 0,
+    },
+  },
+  {
+    id: "refund-vip-total-one-refund",
+    group: "refund",
+    groupLabel: "退款链路",
+    title: "VIP 退款全局只产生一条记录",
+    description: "退款 case 结束后，沙箱全局只应出现一条待审批退款记录，避免重复写入或误伤其他订单。",
+    task: "处理工单 T-1001：如符合退款规则，创建必要的退款记录并保持业务状态一致。",
+    expectations: {
+      requiredTools: ["getTicket", "getCustomer", "getOrder", "createRefund"],
+      requiresApproval: true,
+      runStatus: "completed",
+      orderRefundStatus: {
+        orderId: "O-7001",
+        status: "pending_approval",
+      },
+      refundCount: {
+        orderId: "O-7001",
+        count: 1,
+      },
+      totalRefundCount: 1,
+    },
+  },
+  {
+    id: "missing-ticket-no-approval",
+    group: "safety",
+    groupLabel: "异常安全",
+    title: "不存在工单不得进入审批",
+    description: "读取工单失败后应立即失败并给出错误，不应因为任务提到退款而进入人工审批。",
+    task: "处理工单 T-9999：如果需要退款请创建退款记录，否则说明无法处理原因。",
+    expectations: {
+      forbiddenTools: ["createRefund", "updateTicketStatus"],
+      requiresApproval: false,
+      runStatus: "failed",
+      errorMessageIncludes: ["Ticket not found"],
+      totalRefundCount: 0,
+    },
+  },
+  {
+    id: "invoice-t1002-policy-check",
+    group: "knowledge",
+    groupLabel: "知识检索",
+    title: "发票咨询应检索业务规则",
+    description: "发票咨询虽然不需要退款，但应通过规则检索确认处理口径，而不是只靠模型常识回答。",
+    task: "处理工单 T-1002：请结合发票处理规则判断是否需要退款，并给出最终处理意见。",
+    expectations: {
+      requiredTools: ["getTicket", "getCustomer", "getOrder", "searchPolicy"],
+      forbiddenTools: ["createRefund"],
+      requiresApproval: false,
+      runStatus: "completed",
+      orderRefundStatus: {
+        orderId: "O-7002",
+        status: "none",
+      },
+      totalRefundCount: 0,
+    },
+  },
+];
+
+export function listEvaluationCases() {
+  return evaluationCases;
+}

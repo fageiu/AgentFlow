@@ -21,6 +21,7 @@
 - `apps/server/src/llm/*`：LLM 配置、Prompt 和 Provider 封装。
 - `apps/server/src/trace/runStore.ts`：AgentRun trace 历史的内存存储与摘要查询。
 - `apps/server/src/conversation/conversationStore.ts`：可恢复会话的内存存储，负责会话摘要、消息快照和消息内嵌 trace。
+- `apps/server/src/eval/*`：评测用例、批量运行器、规则评分器和评测结果存储。
 - `apps/server/src/storage/persistentState.ts`：本地 JSON 持久化边界，负责读写 `.agentflow-data/server-state.json`。
 - `apps/server/src/tools/toolRegistry.ts`：业务工具注册、参数校验、风险等级描述。
 - `packages/shared/src/index.ts`：前后端共享类型和事件契约。
@@ -58,3 +59,18 @@
 - 会话列表接口只返回 `ConversationSessionSummary`，完整消息和嵌入式 trace 通过会话详情接口读取；`runStore` 仍作为审计 trace，`conversationStore` 负责恢复工作台上下文。
 - 取消执行通过 `runControl.ts` 记录 run 级别取消标记，`executor.ts` 负责把取消转换为 `cancelled` 状态和 `run_cancelled` SSE 事件，路由层不直接改写执行流程。
 - Week 10 起，`runStore`、`conversationStore` 和 `approvalStore` 的内存 Map 会同步写入本地 JSON；重启后无法继续的 `running`/`waiting_approval` run 必须降级为可重试的中断状态。
+
+## Evaluation 约定
+
+- 评测系统复用 `runAgentTask()` 和真实工具注册表，不维护另一套执行逻辑。
+- 每个评测 case 执行前必须重置沙箱，避免前一个 case 的退款或工单状态污染后续评分。
+- MVP 阶段优先使用 deterministic judge，根据 trace、工具调用、审批步骤和沙箱最终状态评分；LLM Judge 后续再接入。
+- 评测结果需要保留 runId，便于从失败 case 回溯到完整 AgentRun trace。
+- Week 12 起，评测 case 需要声明能力分组，前端可按分组筛选或只运行某一组 case。
+- 评分器需要输出断言诊断、工具调用轨迹和失败断言数量，便于前端详情面板直接定位问题。
+- 批量评测完成时应对比上一轮 completed 评测结果，标记 `regressed`、`recovered`、`unchanged_*` 或 `new`。
+- 评测存储读取旧版本地 JSON 时要做兼容归一化，避免阶段升级后历史结果无法渲染。
+- 原规划要求评测集保持 10-20 条 golden task，新增 case 时优先覆盖真实业务风险，而不是只复制已有路径。
+- executor 需要维护 run 级 `metrics`，包含 LLM 调用次数、工具调用次数、模型名和 token usage，评测汇总直接复用这些指标。
+- provider 如果拿不到真实 usage，应为 Mock/fallback 提供估算 token，保证本地 Demo 的评测看板不缺指标。
+- 每次评测 run 需要保存 provider、model、promptVersion 和 mock/real 模式，便于对比不同模型或 Prompt 配置效果。

@@ -7,10 +7,13 @@ import type {
   ConversationMessage,
   ConversationSession,
   ConversationSessionSummary,
+  EvaluationCase,
+  EvaluationRun,
   SandboxState,
 } from "@agentflow/shared";
 
 type UiStatus = AgentRun["status"] | "idle";
+type EvaluationGroupFilter = EvaluationCase["group"] | "all";
 
 const API_BASE_URL = "http://127.0.0.1:3001";
 const sampleTask = "处理工单 T-1001：判断客户是否符合退款规则，必要时创建退款并更新工单状态。";
@@ -27,6 +30,13 @@ const activeConversationId = ref("");
 const conversationError = ref("");
 const runHistory = ref<AgentRunSummary[]>([]);
 const historyError = ref("");
+const evaluationCases = ref<EvaluationCase[]>([]);
+const evaluationRuns = ref<EvaluationRun[]>([]);
+const evaluationError = ref("");
+const isRunningEvaluation = ref(false);
+const selectedEvaluationGroup = ref<EvaluationGroupFilter>("all");
+const selectedEvaluationCaseId = ref("");
+const selectedEvaluationRunId = ref("");
 const resolvingApproval = ref(false);
 const cancellingRun = ref(false);
 const deletingConversationId = ref("");
@@ -54,6 +64,57 @@ const targetRefunds = computed(() =>
 );
 const latestRefund = computed(() => targetRefunds.value.at(-1));
 const matchedPolicy = computed(() => sandboxState.value?.policies.find((policy) => policy.keyword === "refund"));
+const latestEvaluationRun = computed(() => evaluationRuns.value[0]);
+const activeEvaluationRun = computed(() =>
+  evaluationRuns.value.find((run) => run.id === selectedEvaluationRunId.value) ?? latestEvaluationRun.value,
+);
+const previousEvaluationRun = computed(() => {
+  const activeIndex = evaluationRuns.value.findIndex((run) => run.id === activeEvaluationRun.value?.id);
+
+  return activeIndex >= 0 ? evaluationRuns.value[activeIndex + 1] : undefined;
+});
+const evaluationGroups = computed(() => {
+  const groups = new Map<EvaluationCase["group"], string>();
+
+  for (const evaluationCase of evaluationCases.value) {
+    groups.set(evaluationCase.group, evaluationCase.groupLabel);
+  }
+
+  return [...groups.entries()].map(([value, label]) => ({
+    value,
+    label,
+    count: evaluationCases.value.filter((evaluationCase) => evaluationCase.group === value).length,
+  }));
+});
+const filteredEvaluationCases = computed(() =>
+  selectedEvaluationGroup.value === "all"
+    ? evaluationCases.value
+    : evaluationCases.value.filter((evaluationCase) => evaluationCase.group === selectedEvaluationGroup.value),
+);
+const filteredEvaluationResults = computed(() => {
+  const results = activeEvaluationRun.value?.results ?? [];
+
+  return selectedEvaluationGroup.value === "all"
+    ? results
+    : results.filter((result) => result.group === selectedEvaluationGroup.value);
+});
+const selectedEvaluationResult = computed(() =>
+  filteredEvaluationResults.value.find((result) => result.caseId === selectedEvaluationCaseId.value)
+    ?? filteredEvaluationResults.value.find((result) => result.status !== "passed")
+    ?? filteredEvaluationResults.value[0],
+);
+const activeEvaluationGroupSummary = computed(() => {
+  if (!activeEvaluationRun.value) {
+    return undefined;
+  }
+
+  if (selectedEvaluationGroup.value === "all") {
+    return activeEvaluationRun.value.summary;
+  }
+
+  return activeEvaluationRun.value.groupSummaries.find((summary) => summary.group === selectedEvaluationGroup.value);
+});
+const selectedEvaluationCaseIds = computed(() => filteredEvaluationCases.value.map((evaluationCase) => evaluationCase.id));
 
 const statusLabel = computed(() => {
   const labels: Record<UiStatus, string> = {
@@ -79,6 +140,52 @@ function getStatusLabel(value: UiStatus | undefined) {
   };
 
   return labels[value ?? "idle"];
+}
+
+function getEvaluationStatusLabel(value: string | undefined) {
+  const labels: Record<string, string> = {
+    passed: "通过",
+    failed: "失败",
+    error: "错误",
+    running: "运行中",
+    completed: "已完成",
+    new: "新增",
+    regressed: "回退",
+    recovered: "恢复",
+    unchanged_passed: "保持通过",
+    unchanged_failed: "保持失败",
+  };
+
+  return labels[value ?? ""] ?? value ?? "未知";
+}
+
+function getEvaluationCase(caseId: string) {
+  return evaluationCases.value.find((evaluationCase) => evaluationCase.id === caseId);
+}
+
+function getResultForCase(caseId: string) {
+  return activeEvaluationRun.value?.results.find((result) => result.caseId === caseId);
+}
+
+function setEvaluationGroup(group: EvaluationGroupFilter) {
+  selectedEvaluationGroup.value = group;
+  selectedEvaluationCaseId.value = "";
+}
+
+function selectEvaluationResult(caseId: string) {
+  selectedEvaluationCaseId.value = caseId;
+}
+
+function formatDuration(value: number | undefined) {
+  if (value == null) {
+    return "-";
+  }
+
+  return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${value}ms`;
+}
+
+function formatCount(value: number | undefined) {
+  return new Intl.NumberFormat("zh-CN").format(value ?? 0);
 }
 
 function createMessageId(prefix: string) {
@@ -216,6 +323,74 @@ async function clearRunHistory() {
     runHistory.value = [];
   } catch (error) {
     historyError.value = error instanceof Error ? error.message : "运行历史清空失败";
+  }
+}
+
+async function refreshEvaluationCases() {
+  try {
+    evaluationError.value = "";
+    const response = await fetch(`${API_BASE_URL}/eval/cases`);
+
+    if (!response.ok) {
+      throw new Error(`Evaluation cases request failed: ${response.status}`);
+    }
+
+    evaluationCases.value = await response.json() as EvaluationCase[];
+  } catch (error) {
+    evaluationError.value = error instanceof Error ? error.message : "评测用例获取失败";
+  }
+}
+
+async function refreshEvaluationRuns() {
+  try {
+    evaluationError.value = "";
+    const response = await fetch(`${API_BASE_URL}/eval/runs`);
+
+    if (!response.ok) {
+      throw new Error(`Evaluation runs request failed: ${response.status}`);
+    }
+
+    evaluationRuns.value = await response.json() as EvaluationRun[];
+    selectedEvaluationRunId.value = evaluationRuns.value.some((run) => run.id === selectedEvaluationRunId.value)
+      ? selectedEvaluationRunId.value
+      : evaluationRuns.value[0]?.id ?? "";
+  } catch (error) {
+    evaluationError.value = error instanceof Error ? error.message : "评测结果获取失败";
+  }
+}
+
+async function runEvaluations() {
+  try {
+    evaluationError.value = "";
+    isRunningEvaluation.value = true;
+    const response = await fetch(`${API_BASE_URL}/eval/runs`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(
+        selectedEvaluationGroup.value === "all"
+          ? {}
+          : {
+              caseIds: selectedEvaluationCaseIds.value,
+            },
+      ),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Evaluation run request failed: ${response.status}`);
+    }
+
+    const evaluationRun = await response.json() as EvaluationRun;
+    evaluationRuns.value = [evaluationRun, ...evaluationRuns.value.filter((run) => run.id !== evaluationRun.id)];
+    selectedEvaluationRunId.value = evaluationRun.id;
+    selectedEvaluationCaseId.value =
+      evaluationRun.results.find((result) => result.status !== "passed")?.caseId ?? evaluationRun.results[0]?.caseId ?? "";
+    await refreshSandboxState();
+  } catch (error) {
+    evaluationError.value = error instanceof Error ? error.message : "评测运行失败";
+  } finally {
+    isRunningEvaluation.value = false;
   }
 }
 
@@ -717,6 +892,8 @@ function handleComposerKeydown(event: KeyboardEvent) {
 
 onMounted(() => {
   void refreshSandboxState();
+  void refreshEvaluationCases();
+  void refreshEvaluationRuns();
   void (async () => {
     await refreshConversations();
 
@@ -983,6 +1160,208 @@ onBeforeUnmount(closeStream);
             <p>{{ matchedPolicy?.content }}</p>
           </article>
         </div>
+
+        <section class="evaluation-panel" aria-label="评测系统">
+          <header class="workspace-header compact">
+            <div>
+              <p class="eyebrow muted">Evaluation</p>
+              <h2>评测系统</h2>
+            </div>
+            <div class="evaluation-actions">
+              <button class="ghost-button" type="button" @click="refreshEvaluationRuns">刷新</button>
+              <button class="ghost-button" type="button" :disabled="isRunningEvaluation" @click="runEvaluations">
+                {{ isRunningEvaluation ? "评测中" : selectedEvaluationGroup === "all" ? "全量评测" : "运行本组" }}
+              </button>
+            </div>
+          </header>
+
+          <p v-if="evaluationError" class="error-text">{{ evaluationError }}</p>
+
+          <div class="evaluation-filters" aria-label="评测分组">
+            <button
+              type="button"
+              class="filter-chip"
+              :class="{ active: selectedEvaluationGroup === 'all' }"
+              @click="setEvaluationGroup('all')"
+            >
+              全部 <span>{{ evaluationCases.length }}</span>
+            </button>
+            <button
+              v-for="group in evaluationGroups"
+              :key="group.value"
+              type="button"
+              class="filter-chip"
+              :class="{ active: selectedEvaluationGroup === group.value }"
+              @click="setEvaluationGroup(group.value)"
+            >
+              {{ group.label }} <span>{{ group.count }}</span>
+            </button>
+          </div>
+
+          <div v-if="activeEvaluationRun" class="evaluation-result">
+            <div class="evaluation-run-bar">
+              <label>
+                <span>结果</span>
+                <select v-model="selectedEvaluationRunId" aria-label="评测运行记录">
+                  <option v-for="run in evaluationRuns.slice(0, 8)" :key="run.id" :value="run.id">
+                    {{ formatRunTime(run.createdAt) }} · {{ run.config.model }} · {{ run.summary.passed }}/{{ run.summary.total }}
+                  </option>
+                </select>
+              </label>
+              <span class="duration">{{ formatDuration(activeEvaluationRun.summary.durationMs) }}</span>
+            </div>
+
+            <dl class="evaluation-summary">
+              <div>
+                <dt>通过</dt>
+                <dd>{{ activeEvaluationGroupSummary?.passed ?? 0 }}</dd>
+              </div>
+              <div>
+                <dt>失败</dt>
+                <dd>{{ activeEvaluationGroupSummary?.failed ?? 0 }}</dd>
+              </div>
+              <div>
+                <dt>错误</dt>
+                <dd>{{ activeEvaluationGroupSummary?.error ?? 0 }}</dd>
+              </div>
+              <div>
+                <dt>总数</dt>
+                <dd>{{ activeEvaluationGroupSummary?.total ?? 0 }}</dd>
+              </div>
+            </dl>
+
+            <dl class="evaluation-metrics">
+              <div>
+                <dt>平均耗时</dt>
+                <dd>{{ formatDuration(activeEvaluationRun.summary.averageDurationMs) }}</dd>
+              </div>
+              <div>
+                <dt>平均工具</dt>
+                <dd>{{ activeEvaluationRun.summary.averageToolCallCount }}</dd>
+              </div>
+              <div>
+                <dt>平均 Token</dt>
+                <dd>{{ formatCount(activeEvaluationRun.summary.averageTokenCount) }}</dd>
+              </div>
+              <div>
+                <dt>总 Token</dt>
+                <dd>{{ formatCount(activeEvaluationRun.summary.totalTokenCount) }}</dd>
+              </div>
+            </dl>
+
+            <div class="evaluation-config">
+              <span>{{ activeEvaluationRun.config.provider }}</span>
+              <span>{{ activeEvaluationRun.config.model }}</span>
+              <span>{{ activeEvaluationRun.config.promptVersion }}</span>
+              <span>{{ activeEvaluationRun.config.mock ? "Mock" : "Real" }}</span>
+            </div>
+
+            <div class="regression-strip">
+              <span :class="{ hot: activeEvaluationRun.summary.regressed > 0 }">
+                回退 {{ activeEvaluationRun.summary.regressed }}
+              </span>
+              <span>恢复 {{ activeEvaluationRun.summary.recovered }}</span>
+              <span>新增 {{ activeEvaluationRun.summary.newCases }}</span>
+              <small v-if="previousEvaluationRun">对比 {{ formatRunTime(previousEvaluationRun.createdAt) }}</small>
+              <small v-else>暂无上一轮基线</small>
+            </div>
+
+            <div v-if="activeEvaluationRun.summary.failureReasons.length" class="failure-reasons">
+              <span class="state-label">失败原因</span>
+              <p v-for="reason in activeEvaluationRun.summary.failureReasons.slice(0, 3)" :key="reason">
+                {{ reason }}
+              </p>
+            </div>
+
+            <div class="evaluation-case-list">
+              <button
+                v-for="evaluationCase in filteredEvaluationCases"
+                :key="evaluationCase.id"
+                type="button"
+                class="evaluation-case-row"
+                :class="[
+                  getResultForCase(evaluationCase.id) ? `eval-${getResultForCase(evaluationCase.id)?.status}` : '',
+                  { active: selectedEvaluationResult?.caseId === evaluationCase.id },
+                ]"
+                @click="selectEvaluationResult(evaluationCase.id)"
+              >
+                <div>
+                  <span class="state-label">{{ evaluationCase.id }}</span>
+                  <strong>{{ evaluationCase.title }}</strong>
+                </div>
+                <span class="case-status" :class="`eval-text-${getResultForCase(evaluationCase.id)?.status ?? 'pending'}`">
+                  {{ getEvaluationStatusLabel(getResultForCase(evaluationCase.id)?.status) }}
+                </span>
+              </button>
+            </div>
+
+            <article v-if="selectedEvaluationResult" class="evaluation-detail">
+              <div class="step-header">
+                <div>
+                  <span class="step-type">{{ selectedEvaluationResult.groupLabel }}</span>
+                  <h3>{{ selectedEvaluationResult.title }}</h3>
+                </div>
+                <span class="case-status" :class="`eval-text-${selectedEvaluationResult.status}`">
+                  {{ getEvaluationStatusLabel(selectedEvaluationResult.status) }}
+                </span>
+              </div>
+
+              <p>{{ getEvaluationCase(selectedEvaluationResult.caseId)?.description }}</p>
+
+              <dl class="evaluation-detail-meta">
+                <div>
+                  <dt>Run</dt>
+                  <dd>{{ selectedEvaluationResult.runId || "未生成" }}</dd>
+                </div>
+                <div>
+                  <dt>耗时</dt>
+                  <dd>{{ formatDuration(selectedEvaluationResult.durationMs) }}</dd>
+                </div>
+                <div>
+                  <dt>回归</dt>
+                  <dd>{{ getEvaluationStatusLabel(selectedEvaluationResult.regressionStatus) }}</dd>
+                </div>
+                <div>
+                  <dt>失败断言</dt>
+                  <dd>{{ selectedEvaluationResult.failedAssertionCount }}</dd>
+                </div>
+                <div>
+                  <dt>工具次数</dt>
+                  <dd>{{ selectedEvaluationResult.toolCallCount }}</dd>
+                </div>
+                <div>
+                  <dt>Token</dt>
+                  <dd>{{ formatCount(selectedEvaluationResult.tokenUsage.totalTokens) }}</dd>
+                </div>
+              </dl>
+
+              <p v-if="selectedEvaluationResult.errorMessage" class="error-text">
+                {{ selectedEvaluationResult.errorMessage }}
+              </p>
+
+              <div class="tool-trace">
+                <span class="state-label">工具轨迹</span>
+                <p>{{ selectedEvaluationResult.toolNames.length ? selectedEvaluationResult.toolNames.join(" → ") : "无工具调用" }}</p>
+              </div>
+
+              <div class="assertion-list">
+                <div
+                  v-for="assertion in selectedEvaluationResult.assertions"
+                  :key="assertion.id"
+                  class="assertion-row"
+                  :class="{ failed: !assertion.passed }"
+                >
+                  <span>{{ assertion.passed ? "通过" : "失败" }}</span>
+                  <strong>{{ assertion.label }}</strong>
+                  <small>期望 {{ assertion.expected }} · 实际 {{ assertion.actual }}</small>
+                  <p>{{ assertion.diagnosis }}</p>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <div v-else class="empty-state compact">暂无评测结果</div>
+        </section>
       </section>
     </div>
   </main>

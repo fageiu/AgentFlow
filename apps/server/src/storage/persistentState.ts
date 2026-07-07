@@ -1,12 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { AgentRun, ApprovalRequest, ConversationSession } from "@agentflow/shared";
+import type { AgentRun, ApprovalRequest, ConversationSession, EvaluationRun } from "@agentflow/shared";
 
 interface PersistedState {
   version: 1;
   conversations: ConversationSession[];
   runs: AgentRun[];
   pendingApprovals: ApprovalRequest[];
+  evaluationRuns: EvaluationRun[];
 }
 
 const emptyState: PersistedState = {
@@ -14,6 +15,7 @@ const emptyState: PersistedState = {
   conversations: [],
   runs: [],
   pendingApprovals: [],
+  evaluationRuns: [],
 };
 
 const dataFilePath = join(process.env.AGENTFLOW_DATA_DIR ?? join(process.cwd(), ".agentflow-data"), "server-state.json");
@@ -33,6 +35,7 @@ export function readPersistentState(): PersistedState {
       conversations: Array.isArray(parsed.conversations) ? parsed.conversations : [],
       runs: Array.isArray(parsed.runs) ? parsed.runs : [],
       pendingApprovals: Array.isArray(parsed.pendingApprovals) ? parsed.pendingApprovals : [],
+      evaluationRuns: Array.isArray(parsed.evaluationRuns) ? parsed.evaluationRuns : [],
     };
   } catch (error) {
     console.warn("[persistent-state] Failed to read state file, starting with empty state.", error);
