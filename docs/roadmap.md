@@ -103,3 +103,17 @@
 - Shared frontend formatting and status-label helpers are centralized under `apps/web/src/utils`, reducing duplicated presentation logic across evaluation panels.
 - Agent run trace rendering is extracted into `RunTraceTimeline.vue`, keeping approval controls colocated with step cards.
 - Evaluation view derivation moves into `useEvaluationView()`, separating filtering, active run selection, group summaries, and A/B comparison metrics from the shell component.
+
+## Week 14.5
+
+- Agent tool registry adds read-only ticket query tools: `listTickets` for all tickets and `searchTickets` for status, priority, customer, or keyword filtering.
+- Prompt guidance now distinguishes query/list/filter tasks from processing tasks, keeping query answers read-only and avoiding refund or ticket-status writes.
+- Mock Tool Calling supports ticket query tasks so local demos can answer "查询所有工单" without an API key.
+- Evaluation suite expands to fifteen golden tasks with query cases for all tickets, high-priority tickets, and customer-specific ticket lookup.
+- Deterministic judge supports final-message exclusion assertions to catch query results that include unrelated tickets.
+
+## Week 14.6
+
+- Sandbox seed data expands from two fixed examples to a richer mini business world: ten tickets, six customers, ten orders, and eight policies.
+- New sample tickets cover refund, invoice, SLA outage, contract upgrade, order cancellation, high-risk closure, duplicate refund, and knowledge Q&A scenarios.
+- Initial refund records remain empty so existing evaluation cases can continue asserting that read-only or non-refund tasks do not create refunds.

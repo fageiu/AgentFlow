@@ -6,8 +6,10 @@ import {
   getOrder,
   getSandboxState,
   getTicket,
+  listTickets,
   resetSandboxState,
   searchPolicy,
+  searchTickets,
   updateTicketStatus,
 } from "./sandboxTools.js";
 
@@ -24,6 +26,13 @@ export interface SandboxToolDefinition {
 
 const getTicketInputSchema = z.object({
   ticketId: z.string(),
+});
+
+const searchTicketsInputSchema = z.object({
+  status: z.enum(["open", "waiting_approval", "refunded", "rejected", "closed"]).optional(),
+  priority: z.enum(["low", "medium", "high"]).optional(),
+  customerId: z.string().optional(),
+  keyword: z.string().optional(),
 });
 
 const getCustomerInputSchema = z.object({
@@ -58,6 +67,29 @@ const emptyJsonSchema: JsonObjectSchema = {
 };
 
 const jsonSchemas = {
+  listTickets: {
+    type: "object",
+    properties: {},
+    additionalProperties: false,
+  },
+  searchTickets: {
+    type: "object",
+    properties: {
+      status: {
+        type: "string",
+        enum: ["open", "waiting_approval", "refunded", "rejected", "closed"],
+        description: "可选工单状态筛选条件。",
+      },
+      priority: {
+        type: "string",
+        enum: ["low", "medium", "high"],
+        description: "可选优先级筛选条件。",
+      },
+      customerId: { type: "string", description: "可选客户 ID 筛选条件。" },
+      keyword: { type: "string", description: "可选关键词，会匹配工单 ID、标题、描述、客户 ID 或订单 ID。" },
+    },
+    additionalProperties: false,
+  },
   getTicket: {
     type: "object",
     properties: {
@@ -116,6 +148,27 @@ const jsonSchemas = {
 } satisfies Record<string, JsonObjectSchema>;
 
 export const toolRegistry = {
+  listTickets: {
+    name: "listTickets",
+    description: "查询当前沙箱中的全部工单列表，适合回答“查询所有工单”“列出工单”等只读任务。",
+    riskLevel: "read",
+    inputSchema: emptyInputSchema,
+    jsonSchema: jsonSchemas.listTickets,
+    execute() {
+      return listTickets();
+    },
+  },
+  searchTickets: {
+    name: "searchTickets",
+    description: "按状态、优先级、客户或关键词筛选工单，适合回答待处理、高优先级、某客户相关工单等查询任务。",
+    riskLevel: "read",
+    inputSchema: searchTicketsInputSchema,
+    jsonSchema: jsonSchemas.searchTickets,
+    execute(input) {
+      const parsed = searchTicketsInputSchema.parse(input);
+      return searchTickets(parsed);
+    },
+  },
   getTicket: {
     name: "getTicket",
     description: "根据工单 ID 查询工单详情。",
@@ -207,6 +260,8 @@ export const toolRegistry = {
 export type ToolName = keyof typeof toolRegistry;
 
 const agentToolNames = [
+  "listTickets",
+  "searchTickets",
   "getTicket",
   "getCustomer",
   "getOrder",

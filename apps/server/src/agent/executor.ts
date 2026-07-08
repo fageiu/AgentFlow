@@ -143,6 +143,8 @@ function getToolStepType(name: ToolName): AgentStepType {
 
 function getToolStepTitle(name: ToolName) {
   const titles: Partial<Record<ToolName, string>> = {
+    listTickets: "LLM 调用工具：查询全部工单",
+    searchTickets: "LLM 调用工具：筛选工单",
     getTicket: "LLM 调用工具：查询工单",
     getCustomer: "LLM 调用工具：查询客户",
     getOrder: "LLM 调用工具：查询订单",

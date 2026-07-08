@@ -202,7 +202,7 @@ export interface SandboxState {
   refunds: Refund[];
 }
 
-export type EvaluationCaseGroup = "refund" | "approval" | "knowledge" | "safety" | "idempotency";
+export type EvaluationCaseGroup = "refund" | "approval" | "knowledge" | "query" | "safety" | "idempotency";
 
 export type EvaluationCaseStatus = "passed" | "failed" | "error";
 
@@ -219,6 +219,7 @@ export interface EvaluationExpectations {
   runStatus?: AgentRun["status"];
   errorMessageIncludes?: string[];
   finalMessageIncludes?: string[];
+  finalMessageExcludes?: string[];
   ticketStatus?: {
     ticketId: string;
     status: TicketStatus;

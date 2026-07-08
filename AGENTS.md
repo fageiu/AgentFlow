@@ -28,6 +28,7 @@
 - `apps/server/src/eval/*`：评测用例、批量运行器、规则评分器和评测结果存储。
 - `apps/server/src/storage/persistentState.ts`：本地 JSON 持久化边界，负责读写 `.agentflow-data/server-state.json`。
 - `apps/server/src/tools/toolRegistry.ts`：业务工具注册、参数校验、风险等级描述。
+- `apps/server/src/sandbox/seed.ts`：沙箱初始业务样本数据；默认退款记录保持为空，以免污染只读任务和非退款评测基线。
 - `packages/shared/src/index.ts`：前后端共享类型和事件契约。
 
 ## LLM 接入约定
@@ -45,6 +46,7 @@
 - `inputSchema` 用于后端 Zod 校验，`jsonSchema` 用于暴露给 LLM Tool Calling。
 - executor 不直接调用业务函数，统一通过 `runTool()` 执行，保证 trace、参数校验和风险等级可复用。
 - 只有 `listAgentTools()` 返回的工具会交给 LLM 自主调用；演示控制类工具例如 `resetSandboxState` 不应暴露给模型。
+- 查询类工具例如 `listTickets`、`searchTickets` 应保持 `riskLevel: "read"`，用于只读业务问答，不应产生退款、审批或状态变更。
 
 ## Human Approval 约定
 
@@ -75,6 +77,7 @@
 - 批量评测完成时应对比上一轮 completed 评测结果，标记 `regressed`、`recovered`、`unchanged_*` 或 `new`。
 - 评测存储读取旧版本地 JSON 时要做兼容归一化，避免阶段升级后历史结果无法渲染。
 - 原规划要求评测集保持 10-20 条 golden task，新增 case 时优先覆盖真实业务风险，而不是只复制已有路径。
+- 查询类 case 应断言只读工具调用、结果包含/排除关键工单号，并禁止触发退款或工单状态写入工具。
 - executor 需要维护 run 级 `metrics`，包含 LLM 调用次数、工具调用次数、模型名和 token usage，评测汇总直接复用这些指标。
 - provider 如果拿不到真实 usage，应为 Mock/fallback 提供估算 token，保证本地 Demo 的评测看板不缺指标。
 - 每次评测 run 需要保存 provider、model、promptVersion 和 mock/real 模式，便于对比不同模型或 Prompt 配置效果。

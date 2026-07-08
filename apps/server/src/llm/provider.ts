@@ -109,22 +109,116 @@ function parseToolOutput(messages: LlmChatMessage[], name: string): Record<strin
   }
 }
 
+function parseToolOutputArray(messages: LlmChatMessage[], name: string): Array<Record<string, unknown>> | undefined {
+  const message = [...messages].reverse().find((item) => item.role === "tool" && item.name === name);
+
+  if (!message || message.role !== "tool") {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(message.content) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is Record<string, unknown> => Boolean(item)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function hasToolOutput(messages: LlmChatMessage[], name: string) {
   return messages.some((item) => item.role === "tool" && item.name === name);
 }
 
-function extractTicketIdFromMessages(messages: LlmChatMessage[]) {
+function extractUserTask(messages: LlmChatMessage[]) {
   const userMessage = [...messages].reverse().find((item) => item.role === "user");
 
-  if (!userMessage || userMessage.role !== "user") {
-    return "T-1001";
+  return userMessage?.role === "user" ? userMessage.content : "";
+}
+
+function extractTicketIdFromMessages(messages: LlmChatMessage[]) {
+  return extractUserTask(messages).match(/T-\d+/i)?.[0].toUpperCase() ?? "T-1001";
+}
+
+function isTicketQueryTask(task: string) {
+  return /查询|列出|查看|筛选|统计|所有工单|工单列表|哪些工单/.test(task) && !/处理工单\s*T-\d+/i.test(task);
+}
+
+function createTicketSearchArgs(task: string) {
+  const args: Record<string, unknown> = {};
+
+  if (/待审批|等待审批/.test(task)) {
+    args.status = "waiting_approval";
+  } else if (/打开|未处理|待处理|open/i.test(task)) {
+    args.status = "open";
+  } else if (/已退款/.test(task)) {
+    args.status = "refunded";
+  } else if (/已拒绝|拒绝/.test(task)) {
+    args.status = "rejected";
+  } else if (/已关闭|关闭/.test(task)) {
+    args.status = "closed";
   }
 
-  return userMessage.content.match(/T-\d+/i)?.[0].toUpperCase() ?? "T-1001";
+  if (/高优先级|高优|high/i.test(task)) {
+    args.priority = "high";
+  } else if (/中优先级|medium/i.test(task)) {
+    args.priority = "medium";
+  } else if (/低优先级|low/i.test(task)) {
+    args.priority = "low";
+  }
+
+  const customerId = task.match(/C-\d+/i)?.[0].toUpperCase();
+  if (customerId) {
+    args.customerId = customerId;
+  }
+
+  return args;
+}
+
+function formatTicketList(tickets: Array<Record<string, unknown>> | undefined) {
+  if (!tickets?.length) {
+    return "未查询到符合条件的工单。";
+  }
+
+  return tickets
+    .map((ticket) =>
+      [
+        `- ${ticket.id}`,
+        ticket.title,
+        `状态：${ticket.status}`,
+        `优先级：${ticket.priority}`,
+        `客户：${ticket.customerId}`,
+        `订单：${ticket.orderId}`,
+      ].join("，"),
+    )
+    .join("\n");
 }
 
 /** Mock Tool Calling 会读取上一轮工具输出，模拟模型逐步决定下一次工具调用。 */
 function buildMockChatMessage(input: GenerateChatInput, errorMessage?: string): GenerateChatResult["message"] {
+  const task = extractUserTask(input.messages);
+  const isQueryTask = isTicketQueryTask(task);
+
+  if (isQueryTask) {
+    const searchArgs = createTicketSearchArgs(task);
+    const useSearch = Object.keys(searchArgs).length > 0;
+    const toolName = useSearch ? "searchTickets" : "listTickets";
+
+    if (!hasToolOutput(input.messages, toolName)) {
+      return { toolCalls: [createMockToolCall(toolName, searchArgs)] };
+    }
+
+    const tickets = parseToolOutputArray(input.messages, toolName);
+    return {
+      content: [
+        useSearch ? "已按条件查询工单，结果如下：" : "已查询全部工单，结果如下：",
+        formatTicketList(tickets),
+        "本次为只读查询，未执行退款、审批或工单状态变更。",
+        errorMessage ? `[Mock fallback: ${errorMessage}]` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
+
   const requestedTicketId = extractTicketIdFromMessages(input.messages);
   const ticket = parseToolOutput(input.messages, "getTicket");
   const order = parseToolOutput(input.messages, "getOrder");

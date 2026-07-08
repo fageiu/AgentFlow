@@ -6,7 +6,43 @@ import {
   refunds,
   tickets,
 } from "../sandbox/seed.js";
-import type { RefundStatus, TicketStatus } from "@agentflow/shared";
+import type { RefundStatus, Ticket, TicketStatus } from "@agentflow/shared";
+
+export interface SearchTicketsInput {
+  status?: TicketStatus;
+  priority?: Ticket["priority"];
+  customerId?: string;
+  keyword?: string;
+}
+
+/** 查询全部工单摘要，供 Agent 处理“列出/查看所有工单”这类只读任务。 */
+export function listTickets() {
+  return tickets.map((ticket) => ({ ...ticket }));
+}
+
+/** 按状态、优先级、客户或关键词筛选工单，保持查询类任务不需要读取全量沙箱。 */
+export function searchTickets(input: SearchTicketsInput) {
+  const keyword = input.keyword?.trim().toLowerCase();
+
+  return tickets
+    .filter((ticket) => !input.status || ticket.status === input.status)
+    .filter((ticket) => !input.priority || ticket.priority === input.priority)
+    .filter((ticket) => !input.customerId || ticket.customerId === input.customerId)
+    .filter((ticket) => {
+      if (!keyword) {
+        return true;
+      }
+
+      return [
+        ticket.id,
+        ticket.title,
+        ticket.description,
+        ticket.customerId,
+        ticket.orderId,
+      ].some((value) => value.toLowerCase().includes(keyword));
+    })
+    .map((ticket) => ({ ...ticket }));
+}
 
 /** 根据工单 ID 查询模拟工单，不存在时抛错让执行链路进入错误处理。 */
 export function getTicket(ticketId: string) {

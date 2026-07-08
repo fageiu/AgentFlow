@@ -171,6 +171,19 @@ export function scoreEvaluationCase(input: {
     );
   }
 
+  for (const forbiddenText of expectations.finalMessageExcludes ?? []) {
+    assertions.push(
+      createAssertion(
+        `final-excludes-${forbiddenText}`,
+        `最终结论不包含 ${forbiddenText}`,
+        !finalMessage.includes(forbiddenText),
+        `not include ${forbiddenText}`,
+        finalMessage.includes(forbiddenText) ? `included ${forbiddenText}` : "not-included",
+        `最终回复不应包含 ${forbiddenText}，当前最终回复为 ${finalMessage || "missing-final-message"}。`,
+      ),
+    );
+  }
+
   if (expectations.ticketStatus) {
     const actual = input.sandboxState.tickets.find((ticket) => ticket.id === expectations.ticketStatus?.ticketId)?.status;
     assertions.push(
