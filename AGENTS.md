@@ -13,6 +13,10 @@
 ## 当前重点关注区域
 
 - `apps/web/src/App.vue`：前端任务提交、SSE 监听、执行时间线渲染、人工审批交互。
+- `apps/web/src/components/*`：右侧上下文面板、业务状态、评测系统和评测对比等可复用前端组件。
+- `apps/web/src/composables/*`：前端跨组件状态派生逻辑，例如评测视图筛选、汇总和对比计算。
+- `apps/web/src/api/*`：前端 HTTP/SSE 契约封装，避免组件内散落接口路径和请求细节。
+- `apps/web/src/utils/*`：前端展示格式化、状态文案等轻量工具。
 - Week 7 起，`apps/web/src/App.vue` 采用单会话多轮消息流；每条用户消息对应一个 Agent run，trace 嵌在对应 assistant 消息下。
 - `apps/server/src/main.ts`：Fastify 路由、SSE 响应流、审批接口。
 - `apps/server/src/agent/executor.ts`：Agent 执行流程、步骤事件生成、Tool Calling 循环和审批暂停/恢复。

@@ -16,7 +16,7 @@ import {
 } from "./conversation/conversationStore.js";
 import { listEvaluationCases } from "./eval/evaluationCases.js";
 import { runEvaluationSuite } from "./eval/evaluationRunner.js";
-import { getEvaluationRun, listEvaluationRuns } from "./eval/evaluationStore.js";
+import { clearEvaluationRuns, getEvaluationRun, listEvaluationRuns } from "./eval/evaluationStore.js";
 import { clearRuns, getRun, listRuns } from "./trace/runStore.js";
 import { getSandboxState, resetSandboxState } from "./tools/sandboxTools.js";
 
@@ -87,6 +87,12 @@ app.get("/eval/runs", async () => listEvaluationRuns());
 
 /** 触发一次批量评测；可传 caseIds 只跑部分用例，默认执行全部内置用例。 */
 app.post<{ Body: RunEvaluationBody }>("/eval/runs", async (request) => runEvaluationSuite(request.body?.caseIds));
+
+/** 清空评测运行历史，方便本地演示或重新对比模型/Prompt 效果。 */
+app.delete("/eval/runs", async () => {
+  clearEvaluationRuns();
+  return { ok: true };
+});
 
 /** 单次评测详情接口，便于后续从列表跳转到完整断言结果。 */
 app.get<{ Params: EvaluationRunParams }>("/eval/runs/:evaluationRunId", async (request, reply) => {

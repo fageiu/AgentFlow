@@ -1,4 +1,4 @@
-﻿# Roadmap
+# Roadmap
 
 ## Week 1
 
@@ -93,4 +93,13 @@
 - Mock and fallback LLM calls provide estimated token usage so local demos still show complete evaluation metrics.
 - Evaluation summaries report success rate inputs, average duration, average tool calls, total tool calls, average tokens, total tokens, models, and failure reasons.
 - Evaluation runs persist provider, model, prompt version, and mock/real mode, enabling comparison across different model or prompt configurations.
-- Frontend evaluation panel shows model/prompt configuration, token metrics, average tool calls, and top failure reasons.
+- Frontend evaluation panel shows model/prompt configuration, token metrics, average tool calls, top failure reasons, and A/B comparison between two evaluation runs.
+- Right-side context is split into enterprise-style tabs for business state, evaluation runs, and evaluation comparison, with each view extracted into a dedicated Vue component.
+
+## Week 14
+
+- Frontend shell begins structural decomposition: conversation sidebar and Agent workspace are extracted from `App.vue`.
+- Frontend API calls are centralized under `apps/web/src/api`, including sandbox, conversations, Agent run control, approval, and evaluation requests.
+- Shared frontend formatting and status-label helpers are centralized under `apps/web/src/utils`, reducing duplicated presentation logic across evaluation panels.
+- Agent run trace rendering is extracted into `RunTraceTimeline.vue`, keeping approval controls colocated with step cards.
+- Evaluation view derivation moves into `useEvaluationView()`, separating filtering, active run selection, group summaries, and A/B comparison metrics from the shell component.

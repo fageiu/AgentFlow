@@ -148,3 +148,9 @@ export function listEvaluationRuns() {
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
     .map(cloneEvaluationRun);
 }
+
+/** 清空评测运行历史，只移除 evaluationRuns，避免误删会话、trace 或审批记录。 */
+export function clearEvaluationRuns() {
+  evaluationRuns.clear();
+  persistEvaluationRuns();
+}
