@@ -12,6 +12,12 @@ import {
   resolveApprovalForRun,
   type ApprovalDecision,
 } from "../approval/approvalStore.js";
+import {
+  AgentExecutionError,
+  createAgentErrorEvent,
+  formatAgentErrorDetail,
+  normalizeAgentError,
+} from "./errors.js";
 import { generateChat, generateText } from "../llm/provider.js";
 import { buildPlanPrompt, buildToolCallingMessages } from "../llm/prompts.js";
 import type { LlmChatMessage, LlmToolCall } from "../llm/types.js";
@@ -171,6 +177,65 @@ function addStep(run: AgentRun, step: AgentStep) {
     kind: "step",
     step,
   } satisfies AgentRunEvent;
+}
+
+function buildFailedToolStep(index: number, toolCall: LlmToolCall, error: unknown) {
+  const toolName = isAgentToolName(toolCall.name) ? toolCall.name : undefined;
+  const agentError = normalizeAgentError(error, {
+    phase: "tool_call",
+    toolCallId: toolCall.id,
+    toolName: toolCall.name,
+    arguments: toolCall.arguments,
+  });
+
+  return {
+    agentError,
+    step: createStep({
+      index,
+      type: toolName ? getToolStepType(toolName) : "observation",
+      title: toolName ? `${getToolStepTitle(toolName)}失败` : "工具调用失败：工具不可用",
+      detail: formatAgentErrorDetail(agentError, {
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        arguments: toolCall.arguments,
+      }),
+      toolName,
+      status: "failed",
+    }),
+  };
+}
+
+function appendRunFailureStep(run: AgentRun, error: unknown) {
+  const agentError = normalizeAgentError(error, {
+    phase: "agent_run",
+    runId: run.id,
+  });
+
+  run.steps.push(createStep({
+    index: run.steps.length + 1,
+    type: "observation",
+    title: "Agent 执行失败：错误处理",
+    detail: formatAgentErrorDetail(agentError, {
+      runId: run.id,
+      task: run.task,
+    }),
+    status: "failed",
+  }));
+
+  return agentError;
+}
+
+function failRun(run: AgentRun, error: unknown) {
+  const agentError = error instanceof AgentExecutionError && error.alreadyTraced
+    ? normalizeAgentError(error)
+    : appendRunFailureStep(run, error);
+
+  run.status = "failed";
+  run.completedAt = new Date().toISOString();
+  run.error = agentError;
+  saveRun(run);
+  clearRunCancel(run.id);
+  return agentError;
 }
 
 /** 通过工具注册表执行模型请求的工具，并把结果包装成时间线 step。 */
@@ -353,24 +418,38 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
     if (toolCalls.length > 0) {
       for (const toolCall of toolCalls) {
         throwIfRunCancelled(run);
-        if (!isAgentToolName(toolCall.name)) {
-          throw new Error(`Tool is not available to agent: ${toolCall.name}`);
-        }
-
-        const tool = toolRegistry[toolCall.name];
-        if (tool.riskLevel === "high") {
-          const rejectedToolMessage = yield* requestApprovalForTool(run, stepIndex++, toolCall, mode);
-
-          if (rejectedToolMessage) {
-            messages.push(rejectedToolMessage);
-            continue;
+        try {
+          if (!isAgentToolName(toolCall.name)) {
+            throw new Error(`Tool is not available to agent: ${toolCall.name}`);
           }
-        }
 
-        const toolStep = await buildToolStep(run, stepIndex++, toolCall);
-        messages.push(toolStep.toolMessage);
-        yield addStep(run, toolStep.step);
-        throwIfRunCancelled(run);
+          const tool = toolRegistry[toolCall.name];
+          if (tool.riskLevel === "high") {
+            const rejectedToolMessage = yield* requestApprovalForTool(run, stepIndex++, toolCall, mode);
+
+            if (rejectedToolMessage) {
+              messages.push(rejectedToolMessage);
+              continue;
+            }
+          }
+
+          const toolStep = await buildToolStep(run, stepIndex++, toolCall);
+          messages.push(toolStep.toolMessage);
+          yield addStep(run, toolStep.step);
+          throwIfRunCancelled(run);
+        } catch (error) {
+          if (error instanceof AgentRunCancelledError) {
+            throw error;
+          }
+
+          recordToolCall(run);
+          const failedToolStep = buildFailedToolStep(stepIndex++, toolCall, error);
+          yield addStep(run, failedToolStep.step);
+          throw new AgentExecutionError(failedToolStep.agentError, {
+            alreadyTraced: true,
+            cause: error,
+          });
+        }
       }
 
       continue;
@@ -426,11 +505,11 @@ export async function runAgentTask(task: string): Promise<AgentRun> {
       return run;
     }
 
-    run.status = "failed";
-    run.completedAt = new Date().toISOString();
-    saveRun(run);
-    clearRunCancel(run.id);
-    throw error;
+    const agentError = failRun(run, error);
+    throw new AgentExecutionError(agentError, {
+      alreadyTraced: true,
+      cause: error,
+    });
   }
 }
 
@@ -473,10 +552,7 @@ export async function* streamAgentTask(task: string): AsyncGenerator<AgentRunEve
       return;
     }
 
-    run.status = "failed";
-    run.completedAt = new Date().toISOString();
-    saveRun(run);
-    clearRunCancel(run.id);
-    throw error;
+    const agentError = failRun(run, error);
+    yield createAgentErrorEvent(run, agentError);
   }
 }

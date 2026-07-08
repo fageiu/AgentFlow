@@ -158,6 +158,19 @@ export function scoreEvaluationCase(input: {
     );
   }
 
+  if (expectations.errorCode) {
+    assertions.push(
+      createAssertion(
+        "error-code",
+        "结构化错误码符合预期",
+        input.run?.error?.code === expectations.errorCode,
+        expectations.errorCode,
+        input.run?.error?.code ?? "missing-error-code",
+        `评测要求错误码为 ${expectations.errorCode}，当前为 ${input.run?.error?.code ?? "missing-error-code"}。`,
+      ),
+    );
+  }
+
   for (const expectedText of expectations.finalMessageIncludes ?? []) {
     assertions.push(
       createAssertion(

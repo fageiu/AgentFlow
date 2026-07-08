@@ -3,6 +3,7 @@ import Fastify from "fastify";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AgentRunEvent, ConversationMessage } from "@agentflow/shared";
 import { getPendingApprovalByRun, resolveApprovalForRun } from "./approval/approvalStore.js";
+import { normalizeAgentError } from "./agent/errors.js";
 import { runAgentTask, streamAgentTask } from "./agent/executor.js";
 import { requestRunCancel } from "./agent/runControl.js";
 import {
@@ -310,6 +311,17 @@ function persistRunEventToConversation(conversationId: string, assistantMessageI
       steps: event.run.steps,
       errorMessage: "本次执行已取消，可重试上一条任务。",
     });
+    return;
+  }
+
+  if (event.kind === "error") {
+    updateAssistantRunMessage(conversationId, assistantMessageId, {
+      content: event.error?.userMessage ?? event.message,
+      run: event.run,
+      status: event.run?.status ?? "failed",
+      steps: event.run?.steps ?? getAssistantSteps(conversationId, assistantMessageId),
+      errorMessage: event.message,
+    });
   }
 }
 
@@ -372,13 +384,20 @@ async function handleRunAgentStream(
       writeSseEvent(reply, event);
     }
   } catch (error) {
+    const agentError = normalizeAgentError(error, {
+      phase: "sse_route",
+      conversationId: conversation.id,
+      assistantMessageId: assistantMessage.id,
+    });
     updateAssistantRunMessage(conversation.id, assistantMessage.id, {
       status: "failed",
-      errorMessage: error instanceof Error ? error.message : "Unknown agent execution error.",
+      content: agentError.userMessage,
+      errorMessage: agentError.userMessage,
     });
     writeSseEvent(reply, {
       kind: "error",
-      message: error instanceof Error ? error.message : "Unknown agent execution error.",
+      message: agentError.userMessage,
+      error: agentError,
     });
   } finally {
     reply.raw.end();

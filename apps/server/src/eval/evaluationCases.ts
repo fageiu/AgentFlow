@@ -132,6 +132,7 @@ export const evaluationCases: EvaluationCase[] = [
       forbiddenTools: ["createRefund", "updateTicketStatus"],
       requiresApproval: false,
       runStatus: "failed",
+      errorCode: "BUSINESS_DATA_NOT_FOUND",
       errorMessageIncludes: ["Ticket not found"],
       orderRefundStatus: {
         orderId: "O-7001",
@@ -287,6 +288,7 @@ export const evaluationCases: EvaluationCase[] = [
       forbiddenTools: ["createRefund", "updateTicketStatus"],
       requiresApproval: false,
       runStatus: "failed",
+      errorCode: "BUSINESS_DATA_NOT_FOUND",
       errorMessageIncludes: ["Ticket not found"],
       totalRefundCount: 0,
     },

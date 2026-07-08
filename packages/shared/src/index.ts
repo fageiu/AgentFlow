@@ -16,6 +16,15 @@ export interface AgentRunMetrics {
   tokenUsage: LlmTokenUsage;
 }
 
+export interface AgentErrorInfo {
+  code: string;
+  category: "business" | "tool" | "llm" | "system";
+  message: string;
+  userMessage: string;
+  retryable: boolean;
+  details?: Record<string, unknown>;
+}
+
 /** 高风险工具调用的人工审批请求，前后端通过它共享审批状态。 */
 export interface ApprovalRequest {
   id: string;
@@ -53,6 +62,7 @@ export interface AgentRun {
   createdAt: string;
   completedAt?: string;
   metrics?: AgentRunMetrics;
+  error?: AgentErrorInfo;
 }
 
 /** 历史运行列表使用的轻量摘要，避免列表接口一次性传回完整 trace 明细。 */
@@ -137,6 +147,8 @@ export type AgentRunEvent =
   | {
       kind: "error";
       message: string;
+      error?: AgentErrorInfo;
+      run?: AgentRun;
     };
 
 export type TicketStatus = "open" | "waiting_approval" | "refunded" | "rejected" | "closed";
@@ -218,6 +230,7 @@ export interface EvaluationExpectations {
   requiresApproval?: boolean;
   runStatus?: AgentRun["status"];
   errorMessageIncludes?: string[];
+  errorCode?: string;
   finalMessageIncludes?: string[];
   finalMessageExcludes?: string[];
   ticketStatus?: {

@@ -641,12 +641,21 @@ async function applyRunEvent(event: Event) {
     return;
   }
 
-  updateActiveAssistant((message) => ({
-    ...message,
-    status: "failed",
-    errorMessage: payload.message,
-  }));
-  closeStream();
+  if (payload.kind === "error") {
+    updateActiveAssistant((message) => ({
+      ...message,
+      run: payload.run ?? message.run,
+      status: payload.run?.status ?? "failed",
+      steps: payload.run?.steps ?? message.steps,
+      content: payload.error?.userMessage ?? payload.message,
+      errorMessage: payload.message,
+    }));
+    closeStream();
+    await refreshSandboxState();
+    await refreshConversations();
+    scrollConversationToBottom();
+    return;
+  }
 }
 
 async function sendMessage() {

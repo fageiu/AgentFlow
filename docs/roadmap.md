@@ -117,3 +117,10 @@
 - Sandbox seed data expands from two fixed examples to a richer mini business world: ten tickets, six customers, ten orders, and eight policies.
 - New sample tickets cover refund, invoice, SLA outage, contract upgrade, order cancellation, high-risk closure, duplicate refund, and knowledge Q&A scenarios.
 - Initial refund records remain empty so existing evaluation cases can continue asserting that read-only or non-refund tasks do not create refunds.
+
+## Week 14.7
+
+- Agent execution adds a dedicated error handling layer with normalized error codes, categories, retry hints, and user-facing messages.
+- Tool failures now create failed trace steps instead of disappearing into route-level exceptions.
+- Failed runs persist structured `error` metadata and stream SSE `error` events with the latest run snapshot.
+- Evaluation safety cases assert `BUSINESS_DATA_NOT_FOUND`, covering missing-ticket paths without triggering approval or write tools.
