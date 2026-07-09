@@ -707,7 +707,12 @@ async function sendMessage() {
   eventSource.addEventListener("run_cancelled", applyRunEvent);
   eventSource.addEventListener("error", (event) => {
     const payload = readEvent(event);
-    const errorMessage = payload?.kind === "error" ? payload.message : "执行流连接中断，请确认后端服务是否正在运行。";
+
+    if (payload?.kind === "error") {
+      void applyRunEvent(event);
+      return;
+    }
+    const errorMessage = "执行流连接中断，请确认后端服务是否正在运行。";
 
     updateActiveAssistant((message) => ({
       ...message,

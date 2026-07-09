@@ -1,4 +1,5 @@
 import type {
+  AgentErrorInfo,
   AgentRun,
   AgentRunEvent,
   AgentRunMetrics,
@@ -19,7 +20,12 @@ import {
   normalizeAgentError,
 } from "./errors.js";
 import { generateChat, generateText } from "../llm/provider.js";
-import { buildPlanPrompt, buildToolCallingMessages } from "../llm/prompts.js";
+import {
+  buildErrorSummaryPrompt,
+  buildFinalConclusionPrompt,
+  buildPlanPrompt,
+  buildToolCallingMessages,
+} from "../llm/prompts.js";
 import type { LlmChatMessage, LlmToolCall } from "../llm/types.js";
 import { saveRun } from "../trace/runStore.js";
 import { isAgentToolName, listAgentTools, runTool, toolRegistry, type ToolName } from "../tools/toolRegistry.js";
@@ -225,10 +231,20 @@ function appendRunFailureStep(run: AgentRun, error: unknown) {
   return agentError;
 }
 
-function failRun(run: AgentRun, error: unknown) {
-  const agentError = error instanceof AgentExecutionError && error.alreadyTraced
+async function failRun(run: AgentRun, error: unknown) {
+  const normalizedError = error instanceof AgentExecutionError && error.alreadyTraced
     ? normalizeAgentError(error)
     : appendRunFailureStep(run, error);
+  const agentError = await enrichErrorWithLlmSummary(run, normalizedError);
+
+  const lastFailedStep = [...run.steps].reverse().find((step) => step.status === "failed");
+  if (lastFailedStep) {
+    lastFailedStep.detail = formatAgentErrorDetail(agentError, {
+      runId: run.id,
+      task: run.task,
+      ...(agentError.details ?? {}),
+    });
+  }
 
   run.status = "failed";
   run.completedAt = new Date().toISOString();
@@ -285,6 +301,98 @@ async function buildPlanStep(task: string, index: number) {
     tokenUsage: plan.value.tokenUsage,
     status: "completed",
   });
+}
+
+function summarizeStepsForFinalPrompt(steps: AgentStep[]) {
+  return steps
+    .filter((step) => step.type !== "final")
+    .map((step) => ({
+      type: step.type,
+      title: step.title,
+      status: step.status,
+      toolName: step.toolName,
+      detail: step.detail.length > 1800 ? `${step.detail.slice(0, 1800)}...` : step.detail,
+    }));
+}
+
+/** 基于完整执行 trace 再生成一次面向用户的精简结论，避免把过程日志或评测指标暴露到最终回复。 */
+async function buildFinalConclusionStep(run: AgentRun, index: number, candidate: string) {
+  const finalPrompt = buildFinalConclusionPrompt({
+    task: run.task,
+    candidate,
+    steps: summarizeStepsForFinalPrompt(run.steps),
+  });
+  const final = await measureStep(() =>
+    generateText({
+      ...finalPrompt,
+      temperature: 0.1,
+    }),
+  );
+
+  recordLlmUsage(run, final.value.model, final.value.tokenUsage);
+
+  return createStep({
+    index,
+    type: "final",
+    title: final.value.isMock ? "生成最终回复（Mock LLM）" : "生成最终回复",
+    detail: final.value.text,
+    durationMs: final.durationMs,
+    toolName: final.value.model,
+    modelName: final.value.model,
+    tokenUsage: final.value.tokenUsage,
+    status: "completed",
+  });
+}
+
+function parseErrorSummaryText(text: string) {
+  try {
+    const parsed = JSON.parse(text) as { detailMessage?: unknown; suggestion?: unknown };
+    return {
+      detailMessage: typeof parsed.detailMessage === "string" ? parsed.detailMessage.trim() : undefined,
+      suggestion: typeof parsed.suggestion === "string" ? parsed.suggestion.trim() : undefined,
+    };
+  } catch {
+    return {
+      detailMessage: text.trim(),
+      suggestion: undefined,
+    };
+  }
+}
+
+async function enrichErrorWithLlmSummary(run: AgentRun, error: AgentErrorInfo) {
+  if (error.category === "llm") {
+    return error;
+  }
+
+  try {
+    const prompt = buildErrorSummaryPrompt({
+      task: run.task,
+      error,
+      steps: summarizeStepsForFinalPrompt(run.steps),
+    });
+    const summary = await measureStep(() =>
+      generateText({
+        ...prompt,
+        temperature: 0.1,
+      }),
+    );
+    const parsed = parseErrorSummaryText(summary.value.text);
+
+    recordLlmUsage(run, summary.value.model, summary.value.tokenUsage);
+
+    return {
+      ...error,
+      detailMessage: parsed.detailMessage ?? error.detailMessage,
+      suggestion: parsed.suggestion ?? error.suggestion,
+      details: {
+        ...error.details,
+        errorSummaryModel: summary.value.model,
+        errorSummaryMock: summary.value.isMock,
+      },
+    };
+  } catch {
+    return error;
+  }
 }
 
 function resolveApprovalStep(run: AgentRun, approval: ApprovalRequest) {
@@ -444,8 +552,15 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
 
           recordToolCall(run);
           const failedToolStep = buildFailedToolStep(stepIndex++, toolCall, error);
+          const enrichedError = await enrichErrorWithLlmSummary(run, failedToolStep.agentError);
+          failedToolStep.agentError = enrichedError;
+          failedToolStep.step.detail = formatAgentErrorDetail(enrichedError, {
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            arguments: toolCall.arguments,
+          });
           yield addStep(run, failedToolStep.step);
-          throw new AgentExecutionError(failedToolStep.agentError, {
+          throw new AgentExecutionError(enrichedError, {
             alreadyTraced: true,
             cause: error,
           });
@@ -457,20 +572,8 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
 
     if (assistant.value.message.content) {
       throwIfRunCancelled(run);
-      yield addStep(
-        run,
-        createStep({
-          index: stepIndex++,
-          type: "final",
-          title: assistant.value.isMock ? "生成处理结论（Mock LLM）" : "生成处理结论",
-          detail: assistant.value.message.content,
-          durationMs: assistant.durationMs,
-          toolName: assistant.value.model,
-          modelName: assistant.value.model,
-          tokenUsage: assistant.value.tokenUsage,
-          status: "completed",
-        }),
-      );
+      const finalStep = await buildFinalConclusionStep(run, stepIndex++, assistant.value.message.content);
+      yield addStep(run, finalStep);
       return;
     }
 
@@ -505,7 +608,7 @@ export async function runAgentTask(task: string): Promise<AgentRun> {
       return run;
     }
 
-    const agentError = failRun(run, error);
+    const agentError = await failRun(run, error);
     throw new AgentExecutionError(agentError, {
       alreadyTraced: true,
       cause: error,
@@ -552,7 +655,7 @@ export async function* streamAgentTask(task: string): AsyncGenerator<AgentRunEve
       return;
     }
 
-    const agentError = failRun(run, error);
+    const agentError = await failRun(run, error);
     yield createAgentErrorEvent(run, agentError);
   }
 }

@@ -21,6 +21,8 @@ export interface AgentErrorInfo {
   category: "business" | "tool" | "llm" | "system";
   message: string;
   userMessage: string;
+  detailMessage?: string;
+  suggestion?: string;
   retryable: boolean;
   details?: Record<string, unknown>;
 }

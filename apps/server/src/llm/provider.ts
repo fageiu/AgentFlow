@@ -61,6 +61,31 @@ function parseUsage(data: ChatCompletionResponse, fallback: LlmTokenUsage): LlmT
 
 /** 生成 Mock 文本，保证没有 API Key 时项目仍可完整演示。 */
 function buildMockText(input: GenerateTextInput) {
+  if (input.system.includes("[ERROR_SUMMARY]")) {
+    const message = input.user.match(/"message":\s*"([^"]+)"/)?.[1] ?? "未知错误";
+    const toolName = input.user.match(/"toolName":\s*"([^"]+)"/)?.[1];
+    const keyword = input.user.match(/"keyword":\s*"([^"]+)"/)?.[1];
+    const ticketId = input.user.match(/"ticketId":\s*"([^"]+)"/)?.[1];
+    const target = keyword ? `关键字 ${keyword}` : ticketId ? `工单 ${ticketId}` : message;
+
+    return JSON.stringify({
+      detailMessage: toolName ? `${toolName} 调用失败：未找到 ${target} 对应的数据。` : `未找到 ${target} 对应的数据。`,
+      suggestion: "请检查输入的业务 ID 或查询关键字是否存在，必要时先执行查询工具确认可用数据。",
+    });
+  }
+
+  if (input.system.includes("[FINAL_CONCLUSION]")) {
+    const ticketId = input.user.match(/T-\d+/i)?.[0]?.toUpperCase() ?? "该工单";
+    const statusMatch = input.user.match(/"status"\s*:\s*"([^"]+)"/);
+    const status = statusMatch?.[1];
+
+    return [
+      `本次任务已完成，已基于真实工具结果处理 ${ticketId}。`,
+      status ? `当前关键业务状态为 ${status}。` : "已完成必要的业务核查和处理判断。",
+      "如需继续处理，请根据当前业务状态执行下一步人工确认或客户沟通。",
+    ].join("\n");
+  }
+
   if (input.system.includes("执行计划")) {
     return [
       "1. 读取工单信息，确认客户、订单和诉求。",

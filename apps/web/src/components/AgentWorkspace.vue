@@ -3,7 +3,10 @@ import { nextTick, ref } from "vue";
 import type { AgentRun, ConversationMessage } from "@agentflow/shared";
 import { formatRunTime } from "../utils/format";
 import { getRunStatusLabel } from "../utils/labels";
-import RunTraceTimeline from "./RunTraceTimeline.vue";
+import { getFinalStepMessage, getTraceSteps } from "../utils/trace";
+import AgentErrorSummary from "./AgentErrorSummary.vue";
+import AgentRunFlow from "./AgentRunFlow.vue";
+import AgentRunSummary from "./AgentRunSummary.vue";
 
 type UiStatus = AgentRun["status"] | "idle";
 
@@ -49,6 +52,30 @@ function handleComposerKeydown(event: KeyboardEvent) {
   }
 }
 
+function getVisibleTraceSteps(message: ConversationMessage) {
+  return getTraceSteps(message.steps);
+}
+
+function getAssistantFinalMessage(message: ConversationMessage) {
+  return getFinalStepMessage(message.steps) ?? message.content;
+}
+
+function isAssistantActive(message: ConversationMessage) {
+  return message.status === "running" || message.status === "waiting_approval";
+}
+
+function isAssistantTerminal(message: ConversationMessage) {
+  return message.status === "completed" || message.status === "failed" || message.status === "cancelled";
+}
+
+function shouldShowRunFlow(message: ConversationMessage) {
+  return message.role === "assistant" && (getVisibleTraceSteps(message).length > 0 || isAssistantActive(message));
+}
+
+function shouldShowMessageContent(message: ConversationMessage) {
+  return message.role === "user" || (message.role === "assistant" && !shouldShowRunFlow(message));
+}
+
 defineExpose({
   scrollToBottom,
   focusComposer,
@@ -87,16 +114,31 @@ defineExpose({
             {{ getRunStatusLabel(message.status) }}
           </span>
         </div>
-        <p class="message-content">{{ message.content }}</p>
+        <p v-if="shouldShowMessageContent(message)" class="message-content">
+          {{ message.content }}
+        </p>
 
-        <p v-if="message.errorMessage" class="error-text">{{ message.errorMessage }}</p>
+        <AgentErrorSummary
+          v-if="message.role === 'assistant' && (message.run?.error || message.errorMessage) && !(message.steps?.length)"
+          :error="message.run?.error"
+          :fallback-message="message.errorMessage"
+        />
+        <p v-else-if="message.errorMessage && !(message.steps?.length)" class="error-text">{{ message.errorMessage }}</p>
 
-        <RunTraceTimeline
-          v-if="message.role === 'assistant' && (message.steps?.length ?? 0) > 0"
-          :steps="message.steps ?? []"
+        <AgentRunFlow
+          v-if="shouldShowRunFlow(message)"
+          :steps="getVisibleTraceSteps(message)"
+          :status="message.status"
           :message-id="message.id"
           :resolving-approval="resolvingApproval"
           @resolve-approval="$emit('resolveApproval', $event, message.id)"
+        />
+
+        <AgentRunSummary
+          v-if="message.role === 'assistant' && (message.steps?.length ?? 0) > 0 && isAssistantTerminal(message)"
+          :run="message.run"
+          :fallback-error-message="message.errorMessage"
+          :final-message="getAssistantFinalMessage(message)"
         />
       </article>
     </div>
