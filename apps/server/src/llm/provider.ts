@@ -76,8 +76,26 @@ function buildMockText(input: GenerateTextInput) {
 
   if (input.system.includes("[FINAL_CONCLUSION]")) {
     const ticketId = input.user.match(/T-\d+/i)?.[0]?.toUpperCase() ?? "该工单";
+    const candidate = input.user.match(/候选结论：([\s\S]*?)\n\n执行步骤：/)?.[1]?.trim();
     const statusMatch = input.user.match(/"status"\s*:\s*"([^"]+)"/);
     const status = statusMatch?.[1];
+
+    if (candidate && /已查询|查询工单|结果如下|只读查询/.test(candidate)) {
+      return candidate
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(0, 5)
+        .join("\n");
+    }
+
+    if (/未创建退款|未执行退款|未更新工单状态|未执行写入/.test(input.user)) {
+      return [
+        `本次任务已完成，已基于真实工具结果处理 ${ticketId}。`,
+        "已确认该任务不需要退款或高风险状态变更，未创建退款记录。",
+        "已完成只读核查，可继续按业务规则与客户沟通后续处理。",
+      ].join("\n");
+    }
 
     return [
       `本次任务已完成，已基于真实工具结果处理 ${ticketId}。`,
@@ -120,6 +138,14 @@ function createMockToolCall(name: string, args: Record<string, unknown>): LlmToo
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isToolErrorPayload(value: unknown) {
+  return isRecord(value) && value.ok === false && isRecord(value.error);
+}
+
 function parseToolOutput(messages: LlmChatMessage[], name: string): Record<string, unknown> | undefined {
   const message = [...messages].reverse().find((item) => item.role === "tool" && item.name === name);
 
@@ -128,7 +154,8 @@ function parseToolOutput(messages: LlmChatMessage[], name: string): Record<strin
   }
 
   try {
-    return JSON.parse(message.content) as Record<string, unknown>;
+    const parsed = JSON.parse(message.content) as unknown;
+    return isRecord(parsed) && !isToolErrorPayload(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }
@@ -143,14 +170,39 @@ function parseToolOutputArray(messages: LlmChatMessage[], name: string): Array<R
 
   try {
     const parsed = JSON.parse(message.content) as unknown;
-    return Array.isArray(parsed) ? parsed.filter((item): item is Record<string, unknown> => Boolean(item)) : undefined;
+    return Array.isArray(parsed) ? parsed.filter((item): item is Record<string, unknown> => isRecord(item)) : undefined;
   } catch {
     return undefined;
   }
 }
 
 function hasToolOutput(messages: LlmChatMessage[], name: string) {
-  return messages.some((item) => item.role === "tool" && item.name === name);
+  return messages.some((item) => {
+    if (item.role !== "tool" || item.name !== name) {
+      return false;
+    }
+
+    try {
+      return !isToolErrorPayload(JSON.parse(item.content) as unknown);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function getLastToolError(messages: LlmChatMessage[], name: string) {
+  const message = [...messages].reverse().find((item) => item.role === "tool" && item.name === name);
+
+  if (!message || message.role !== "tool") {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(message.content) as unknown;
+    return isToolErrorPayload(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function extractUserTask(messages: LlmChatMessage[]) {
@@ -165,6 +217,36 @@ function extractTicketIdFromMessages(messages: LlmChatMessage[]) {
 
 function isTicketQueryTask(task: string) {
   return /查询|列出|查看|筛选|统计|所有工单|工单列表|哪些工单/.test(task) && !/处理工单\s*T-\d+/i.test(task);
+}
+
+function isRefundTask(task: string) {
+  return /退款|refund/i.test(task) && !/发票|升级|合同升级|咨询/.test(task);
+}
+
+function createPolicyKeyword(task: string, messages: LlmChatMessage[]) {
+  const lastPolicyError = getLastToolError(messages, "searchPolicy");
+
+  if (lastPolicyError && /升级|合同/.test(task)) {
+    return "upgrade";
+  }
+
+  if (/发票/.test(task)) {
+    return "发票";
+  }
+
+  if (/升级|合同/.test(task)) {
+    return "升级";
+  }
+
+  if (/SLA|服务不可用|不可用/i.test(task)) {
+    return "sla";
+  }
+
+  if (/取消|cancel/i.test(task)) {
+    return "cancel";
+  }
+
+  return "refund";
 }
 
 function createTicketSearchArgs(task: string) {
@@ -247,6 +329,8 @@ function buildMockChatMessage(input: GenerateChatInput, errorMessage?: string): 
   const requestedTicketId = extractTicketIdFromMessages(input.messages);
   const ticket = parseToolOutput(input.messages, "getTicket");
   const order = parseToolOutput(input.messages, "getOrder");
+  const policyKeyword = createPolicyKeyword(task, input.messages);
+  const shouldWriteRefund = isRefundTask(task);
 
   if (!hasToolOutput(input.messages, "getTicket")) {
     return { toolCalls: [createMockToolCall("getTicket", { ticketId: requestedTicketId })] };
@@ -261,7 +345,19 @@ function buildMockChatMessage(input: GenerateChatInput, errorMessage?: string): 
   }
 
   if (!hasToolOutput(input.messages, "searchPolicy")) {
-    return { toolCalls: [createMockToolCall("searchPolicy", { keyword: "refund" })] };
+    return { toolCalls: [createMockToolCall("searchPolicy", { keyword: policyKeyword })] };
+  }
+
+  if (!shouldWriteRefund) {
+    return {
+      content: [
+        "已完成工具调用链路：读取工单、客户、订单和业务规则后，确认该任务不需要退款或高风险状态变更。",
+        "本次为业务咨询处理，未创建退款记录，也未更新工单状态。",
+        errorMessage ? `[Mock fallback: ${errorMessage}]` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
   }
 
   if (!hasToolOutput(input.messages, "createRefund")) {

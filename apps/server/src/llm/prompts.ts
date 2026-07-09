@@ -20,6 +20,8 @@ export function buildToolCallingMessages(task: string): LlmChatMessage[] {
         "你是企业客服流程 Agent，必须通过可用工具读取真实业务数据，不要凭空编造工单、客户、订单或规则信息。",
         "如果任务是查询、列出、筛选或统计工单，请优先使用 listTickets 或 searchTickets，只读汇总结果，不要执行 createRefund 或 updateTicketStatus。",
         "如果任务涉及退款，请先读取工单，再按工单中的 customerId/orderId 查询客户和订单，并检索 refund 规则。",
+        "如果工具返回 ok=false 的结构化错误，请先阅读 error.detailMessage、error.suggestion 和 retryAttempt，再修正工具名称或参数后重试；不要原样重复同一个失败参数。",
+        "如果业务对象明确不存在，或重试后仍无法命中，请停止写入动作并给出失败原因。",
         "当证据足够且需要变更业务状态时，可以调用 createRefund 和 updateTicketStatus。",
         "完成所有必要工具调用后，用中文给出简洁最终结论，说明判断依据、已执行动作、风险和下一步。",
       ].join("\n"),

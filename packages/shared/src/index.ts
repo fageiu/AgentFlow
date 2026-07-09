@@ -229,6 +229,10 @@ export interface EvaluationExpectations {
     toolName: string;
     count: number;
   }>;
+  minimumToolCallCounts?: Array<{
+    toolName: string;
+    count: number;
+  }>;
   requiresApproval?: boolean;
   runStatus?: AgentRun["status"];
   errorMessageIncludes?: string[];

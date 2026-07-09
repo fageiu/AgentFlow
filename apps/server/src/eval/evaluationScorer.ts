@@ -129,6 +129,20 @@ export function scoreEvaluationCase(input: {
     );
   }
 
+  for (const expectedCount of expectations.minimumToolCallCounts ?? []) {
+    const actual = executedToolNames.filter((toolName) => toolName === expectedCount.toolName).length;
+    assertions.push(
+      createAssertion(
+        `tool-min-count-${expectedCount.toolName}`,
+        `工具 ${expectedCount.toolName} 至少调用 ${expectedCount.count} 次`,
+        actual >= expectedCount.count,
+        `>=${expectedCount.count}`,
+        String(actual),
+        `评测要求 ${expectedCount.toolName} 至少执行 ${expectedCount.count} 次，用于验证失败后的参数修正或重试；当前实际执行 ${actual} 次。`,
+      ),
+    );
+  }
+
   if (expectations.requiresApproval != null) {
     const actual = hasApprovalStep(input.run);
     assertions.push(

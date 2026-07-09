@@ -89,6 +89,15 @@ export function getStepSummary(step: AgentStep) {
     return truncateText(step.detail);
   }
 
+  if (isPlainObject(detail.data.retry)) {
+    const retry = detail.data.retry;
+    const attempt = retry.attempt ? `第 ${toCompactText(retry.attempt)} 次重试` : "准备重试";
+    const toolName = retry.toolName ? `工具 ${toCompactText(retry.toolName)}` : "当前工具";
+    const reason = retry.reason ? `原因 ${toCompactText(retry.reason)}` : "";
+
+    return truncateText([attempt, toolName, reason].filter(Boolean).join(" · "));
+  }
+
   const input = detail.data.input;
   const output = detail.data.output;
   const riskLevel = detail.data.riskLevel;

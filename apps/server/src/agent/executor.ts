@@ -33,8 +33,14 @@ import { AgentRunCancelledError, clearRunCancel, throwIfRunCancelled } from "./r
 
 const STEP_DELAY_MS = 250;
 const MAX_TOOL_LOOP_TURNS = 10;
+const MAX_TOOL_RETRY_ATTEMPTS = 2;
 
 type ApprovalMode = "interactive" | "auto";
+
+interface ToolRetryDecision {
+  retryable: boolean;
+  reason: string;
+}
 
 /** 在 Demo 中制造轻微延迟，让前端能看到时间线逐步出现。 */
 function wait(ms: number) {
@@ -177,6 +183,22 @@ function buildToolMessage(toolCall: LlmToolCall, toolName: string, output: unkno
   };
 }
 
+function buildToolErrorMessage(toolCall: LlmToolCall, error: AgentErrorInfo, retryAttempt: number): LlmChatMessage {
+  return buildToolMessage(toolCall, toolCall.name, {
+    ok: false,
+    retryable: error.retryable,
+    retryAttempt,
+    error: {
+      code: error.code,
+      category: error.category,
+      message: error.message,
+      detailMessage: error.detailMessage,
+      suggestion: error.suggestion,
+      details: error.details,
+    },
+  });
+}
+
 function addStep(run: AgentRun, step: AgentStep) {
   run.steps.push(step);
   return {
@@ -209,6 +231,77 @@ function buildFailedToolStep(index: number, toolCall: LlmToolCall, error: unknow
       status: "failed",
     }),
   };
+}
+
+function getRetryStateKey(toolCall: LlmToolCall) {
+  return `${toolCall.name}:${JSON.stringify(toolCall.arguments)}`;
+}
+
+/** 判断工具失败是否值得交还给模型自我修正，避免对明确不存在的数据做无意义重试。 */
+function decideToolRetry(error: AgentErrorInfo, toolCall: LlmToolCall, attempts: number): ToolRetryDecision {
+  if (attempts >= MAX_TOOL_RETRY_ATTEMPTS) {
+    return {
+      retryable: false,
+      reason: `已达到最大重试次数 ${MAX_TOOL_RETRY_ATTEMPTS}。`,
+    };
+  }
+
+  if (error.code === "TOOL_INPUT_VALIDATION_ERROR") {
+    return {
+      retryable: true,
+      reason: "工具参数校验失败，模型可根据校验错误修正参数后重试。",
+    };
+  }
+
+  if (error.code === "TOOL_NOT_AVAILABLE") {
+    return {
+      retryable: true,
+      reason: "模型选择了未开放工具，可重新选择工具注册表中的合法工具。",
+    };
+  }
+
+  if (error.code === "BUSINESS_DATA_NOT_FOUND" && toolCall.name === "searchPolicy") {
+    return {
+      retryable: true,
+      reason: "规则关键词未命中，模型可根据任务语义换用更贴近规则库的关键词重试。",
+    };
+  }
+
+  return {
+    retryable: false,
+    reason: "该错误通常代表业务对象不存在或外部异常，本轮不自动重试。",
+  };
+}
+
+function buildRetryObservationStep(input: {
+  index: number;
+  toolCall: LlmToolCall;
+  error: AgentErrorInfo;
+  retryAttempt: number;
+  decision: ToolRetryDecision;
+}) {
+  return createStep({
+    index: input.index,
+    type: "observation",
+    title: `分析错误并准备第 ${input.retryAttempt} 次重试`,
+    detail: JSON.stringify(
+      {
+        retry: {
+          attempt: input.retryAttempt,
+          maxAttempts: MAX_TOOL_RETRY_ATTEMPTS,
+          toolName: input.toolCall.name,
+          arguments: input.toolCall.arguments,
+          reason: input.decision.reason,
+          instruction: "已将结构化错误作为 tool message 回传给模型，请模型调整工具或参数后继续执行。",
+        },
+        error: input.error,
+      },
+      null,
+      2,
+    ),
+    toolName: input.toolCall.name,
+    status: "completed",
+  });
 }
 
 function appendRunFailureStep(run: AgentRun, error: unknown) {
@@ -504,6 +597,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
 
   const tools = listAgentTools();
   const messages = buildToolCallingMessages(run.task);
+  const retryAttemptsByToolCall = new Map<string, number>();
 
   for (let turn = 1; turn <= MAX_TOOL_LOOP_TURNS; turn += 1) {
     throwIfRunCancelled(run);
@@ -524,6 +618,8 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
     });
 
     if (toolCalls.length > 0) {
+      let shouldAskModelToRecover = false;
+
       for (const toolCall of toolCalls) {
         throwIfRunCancelled(run);
         try {
@@ -553,18 +649,53 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
           recordToolCall(run);
           const failedToolStep = buildFailedToolStep(stepIndex++, toolCall, error);
           const enrichedError = await enrichErrorWithLlmSummary(run, failedToolStep.agentError);
-          failedToolStep.agentError = enrichedError;
-          failedToolStep.step.detail = formatAgentErrorDetail(enrichedError, {
+          const retryStateKey = getRetryStateKey(toolCall);
+          const nextRetryAttempt = (retryAttemptsByToolCall.get(retryStateKey) ?? 0) + 1;
+          const retryDecision = decideToolRetry(enrichedError, toolCall, nextRetryAttempt - 1);
+          const traceError = retryDecision.retryable
+            ? {
+                ...enrichedError,
+                retryable: true,
+                details: {
+                  ...enrichedError.details,
+                  retryDecision: retryDecision.reason,
+                  nextRetryAttempt,
+                },
+              }
+            : enrichedError;
+
+          failedToolStep.agentError = traceError;
+          failedToolStep.step.detail = formatAgentErrorDetail(traceError, {
             toolCallId: toolCall.id,
             toolName: toolCall.name,
             arguments: toolCall.arguments,
           });
           yield addStep(run, failedToolStep.step);
+
+          if (retryDecision.retryable) {
+            retryAttemptsByToolCall.set(retryStateKey, nextRetryAttempt);
+            const retryStep = buildRetryObservationStep({
+              index: stepIndex++,
+              toolCall,
+              error: traceError,
+              retryAttempt: nextRetryAttempt,
+              decision: retryDecision,
+            });
+            messages.push(buildToolErrorMessage(toolCall, traceError, nextRetryAttempt));
+            yield addStep(run, retryStep);
+            shouldAskModelToRecover = true;
+            break;
+          }
+
           throw new AgentExecutionError(enrichedError, {
             alreadyTraced: true,
             cause: error,
           });
         }
+      }
+
+      if (shouldAskModelToRecover) {
+        continue;
       }
 
       continue;
