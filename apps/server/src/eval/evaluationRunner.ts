@@ -203,7 +203,7 @@ async function runEvaluationCase(evaluationCase: EvaluationCase, previousRun: Ev
 
   for (let index = 0; index < repeat; index += 1) {
     try {
-      await runAgentTask(evaluationCase.task);
+      await runAgentTask(evaluationCase.task, evaluationCase.approvalMode ?? "approve");
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : "Unknown evaluation execution error.";
       break;

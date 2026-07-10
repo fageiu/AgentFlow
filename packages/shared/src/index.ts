@@ -16,6 +16,22 @@ export interface AgentRunMetrics {
   tokenUsage: LlmTokenUsage;
 }
 
+/** Planner 产出的单个可执行步骤；allowedTools 是 Executor 的最小工具授权边界。 */
+export interface AgentPlanStep {
+  id: string;
+  title: string;
+  objective: string;
+  allowedTools: string[];
+  requiresApproval?: boolean;
+}
+
+/** 一次运行使用的结构化处理计划，会随 trace 一起保存以便审计与恢复。 */
+export interface AgentPlan {
+  version: 1;
+  summary: string;
+  steps: AgentPlanStep[];
+}
+
 export interface AgentErrorInfo {
   code: string;
   category: "business" | "tool" | "llm" | "system";
@@ -61,6 +77,7 @@ export interface AgentRun {
   task: string;
   status: "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
   steps: AgentStep[];
+  plan?: AgentPlan;
   createdAt: string;
   completedAt?: string;
   metrics?: AgentRunMetrics;
@@ -234,6 +251,7 @@ export interface EvaluationExpectations {
     count: number;
   }>;
   requiresApproval?: boolean;
+  requiresPlan?: boolean;
   runStatus?: AgentRun["status"];
   errorMessageIncludes?: string[];
   errorCode?: string;
@@ -262,6 +280,8 @@ export interface EvaluationCase {
   title: string;
   description: string;
   task: string;
+  /** 非流式评测无法等待真实用户输入，因此可显式模拟高风险调用的审批结论。 */
+  approvalMode?: "approve" | "reject";
   repeat?: number;
   expectations: EvaluationExpectations;
 }

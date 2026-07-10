@@ -36,12 +36,13 @@ docs/
 前端点击“开始执行”
   -> EventSource 连接后端 SSE 接口
   -> 后端创建 AgentRun
-  -> LLM 生成执行计划
-  -> LLM 根据 tools 定义发起 tool_calls
-  -> 后端通过 Tool Registry 校验并执行工具
+  -> Planner 生成并校验结构化执行计划（步骤、工具授权、审批要求）
+  -> Executor 只接受当前计划步骤授权的一项 tool_call
+  -> 后端通过 Tool Registry 校验并执行工具，成功后才推进下一步骤
+  -> 工具失败时将观察结果交给 Replanner，只重规划尚未完成的步骤
   -> 高风险工具进入 approval_required，前端展示批准/拒绝按钮
   -> 审批结果通过 approval_resolved 回到同一条执行流
-  -> 审批通过则执行工具，审批拒绝则把拒绝结果回传给 LLM
+  -> 审批通过则执行工具，审批拒绝则停止后续状态写入并生成拒绝结论
   -> LLM 生成最终结论
   -> 后端保存 AgentRun trace，前端刷新历史列表和沙箱状态
 ```

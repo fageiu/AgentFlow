@@ -52,6 +52,29 @@ export const evaluationCases: EvaluationCase[] = [
     },
   },
   {
+    id: "bare-ticket-processing-uses-context",
+    group: "knowledge",
+    groupLabel: "知识检索",
+    title: "简短处理指令应基于证据自动决策",
+    description: "仅输入工单号时，Agent 应先完成完整核查，再根据该工单的客户、订单和退款规则自动决定是否进入审批退款流程。",
+    task: "处理工单 T-1001",
+    expectations: {
+      requiredTools: ["getTicket", "getCustomer", "getOrder", "searchPolicy", "createRefund", "updateTicketStatus"],
+      requiresApproval: true,
+      requiresPlan: true,
+      runStatus: "completed",
+      ticketStatus: {
+        ticketId: "T-1001",
+        status: "waiting_approval",
+      },
+      orderRefundStatus: {
+        orderId: "O-7001",
+        status: "pending_approval",
+      },
+      totalRefundCount: 1,
+    },
+  },
+  {
     id: "refund-vip-t1001",
     group: "refund",
     groupLabel: "退款链路",
@@ -61,6 +84,7 @@ export const evaluationCases: EvaluationCase[] = [
     expectations: {
       requiredTools: ["getTicket", "getCustomer", "getOrder", "searchPolicy", "createRefund", "updateTicketStatus"],
       requiresApproval: true,
+      requiresPlan: true,
       runStatus: "completed",
       ticketStatus: {
         ticketId: "T-1001",
@@ -330,6 +354,35 @@ export const evaluationCases: EvaluationCase[] = [
       ],
       requiresApproval: false,
       runStatus: "completed",
+      finalMessageIncludes: ["未创建退款"],
+      totalRefundCount: 0,
+    },
+  },
+  {
+    id: "refund-rejected-keeps-ticket-open",
+    group: "approval",
+    groupLabel: "审批边界",
+    title: "退款审批拒绝后不得写入待审批状态",
+    description: "人工拒绝退款时，Agent 应停止后续写入；不得创建退款，也不得把工单错误更新为 waiting_approval。",
+    task: "处理工单 T-1001：判断退款条件，必要时创建退款并更新工单状态。",
+    approvalMode: "reject",
+    expectations: {
+      requiredTools: ["getTicket", "getCustomer", "getOrder", "searchPolicy", "createRefund"],
+      forbiddenTools: ["updateTicketStatus"],
+      requiresApproval: true,
+      runStatus: "completed",
+      ticketStatus: {
+        ticketId: "T-1001",
+        status: "open",
+      },
+      orderRefundStatus: {
+        orderId: "O-7001",
+        status: "none",
+      },
+      refundCount: {
+        orderId: "O-7001",
+        count: 0,
+      },
       finalMessageIncludes: ["未创建退款"],
       totalRefundCount: 0,
     },

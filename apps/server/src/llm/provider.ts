@@ -59,8 +59,129 @@ function parseUsage(data: ChatCompletionResponse, fallback: LlmTokenUsage): LlmT
   };
 }
 
+/** Mock Planner 也输出与真实模型一致的结构化计划，保证本地演示走同一授权链路。 */
+function buildMockPlan(task: string) {
+  const queryTask = isTicketQueryTask(task);
+  const refundTask = isRefundTask(task);
+
+  if (queryTask) {
+    const searchArgs = createTicketSearchArgs(task);
+    const toolName = Object.keys(searchArgs).length > 0 ? "searchTickets" : "listTickets";
+    return {
+      version: 1,
+      summary: "只读查询工单并汇总结果。",
+      steps: [{
+        id: "query-tickets",
+        title: "查询工单",
+        objective: "读取符合用户条件的工单，不产生业务写入。",
+        allowedTools: [toolName],
+        requiresApproval: false,
+      }],
+    };
+  }
+
+  const steps = [
+    ["read-ticket", "读取工单", "确认工单关联的客户、订单和诉求。", "getTicket"],
+    ["read-customer", "读取客户", "核查客户等级和风险信息。", "getCustomer"],
+    ["read-order", "读取订单", "核查订单金额、状态与退款状态。", "getOrder"],
+    ["read-policy", "检索规则", "依据任务检索对应业务规则。", "searchPolicy"],
+  ].map(([id, title, objective, toolName]) => ({
+    id,
+    title,
+    objective,
+    allowedTools: [toolName],
+    requiresApproval: false,
+  }));
+
+  if (refundTask) {
+    steps.push(
+      {
+        id: "create-refund",
+        title: "创建待审批退款",
+        objective: "在规则满足时创建待审批退款记录。",
+        allowedTools: ["createRefund"],
+        requiresApproval: true,
+      },
+      {
+        id: "sync-ticket-status",
+        title: "同步工单状态",
+        objective: "退款记录成功创建后，将工单同步为待审批。",
+        allowedTools: ["updateTicketStatus"],
+        requiresApproval: false,
+      },
+    );
+  }
+
+  return {
+    version: 1,
+    summary: refundTask ? "核查退款条件，必要时在审批后创建退款并同步工单。" : "核查工单上下文和规则后给出只读处理结论。",
+    steps,
+  };
+}
+
+/** Mock 决策阶段同样只根据已传入的工单与规则证据决定是否进入退款流程。 */
+function buildMockActionPlan(evidence: string) {
+  const shouldRefund = /退款|refund/i.test(evidence) && !/发票|invoice/i.test(evidence);
+
+  if (!shouldRefund) {
+    return {
+      version: 1,
+      summary: "现有客户、订单与规则证据不足以支持退款，不执行写入操作。",
+      steps: [],
+    };
+  }
+
+  return {
+    version: 1,
+    summary: "客户、订单和退款规则满足条件，进入待审批退款流程并同步工单状态。",
+    steps: [
+      {
+        id: "create-refund",
+        title: "创建待审批退款",
+        objective: "根据已核查的订单金额创建待审批退款记录。",
+        allowedTools: ["createRefund"],
+        requiresApproval: true,
+      },
+      {
+        id: "sync-ticket-status",
+        title: "同步工单状态",
+        objective: "退款记录创建后，将工单同步为待审批。",
+        allowedTools: ["updateTicketStatus"],
+        requiresApproval: false,
+      },
+    ],
+  };
+}
+
 /** 生成 Mock 文本，保证没有 API Key 时项目仍可完整演示。 */
 function buildMockText(input: GenerateTextInput) {
+  if (input.system.includes("[ACTION_PLANNER]")) {
+    return JSON.stringify(buildMockActionPlan(input.user));
+  }
+
+  if (input.system.includes("[PLANNER]") || input.system.includes("[REPLANNER]")) {
+    const task = input.user.match(/用户任务：\s*([^\n]+)/)?.[1] ?? input.user;
+    const plan = buildMockPlan(task);
+    const completedTools = input.user.match(/已完成工具：\s*([^\n]+)/)?.[1]
+      ?.split(",")
+      .map((item) => item.trim())
+      .filter(Boolean) ?? [];
+
+    if (input.system.includes("[REPLANNER]")) {
+      plan.steps = plan.steps.filter((step) => !completedTools.includes(step.allowedTools[0]));
+    }
+
+    if (input.user.includes("已读取工单上下文")) {
+      plan.steps = plan.steps.filter((step) => step.allowedTools[0] !== "getTicket");
+    }
+
+    if (input.system.includes("[PLANNER]")) {
+      plan.steps = plan.steps.filter((step) => step.allowedTools[0] !== "createRefund" && step.allowedTools[0] !== "updateTicketStatus");
+    }
+
+    return JSON.stringify(plan);
+  }
+
   if (input.system.includes("[ERROR_SUMMARY]")) {
     const message = input.user.match(/"message":\s*"([^"]+)"/)?.[1] ?? "未知错误";
     const toolName = input.user.match(/"toolName":\s*"([^"]+)"/)?.[1];
@@ -101,16 +222,6 @@ function buildMockText(input: GenerateTextInput) {
       `本次任务已完成，已基于真实工具结果处理 ${ticketId}。`,
       status ? `当前关键业务状态为 ${status}。` : "已完成必要的业务核查和处理判断。",
       "如需继续处理，请根据当前业务状态执行下一步人工确认或客户沟通。",
-    ].join("\n");
-  }
-
-  if (input.system.includes("执行计划")) {
-    return [
-      "1. 读取工单信息，确认客户、订单和诉求。",
-      "2. 查询客户等级与风险信息。",
-      "3. 检索退款规则，判断是否满足条件。",
-      "4. 涉及退款或状态变更时调用后端工具落库。",
-      "5. 汇总依据并生成处理结论。",
     ].join("\n");
   }
 
@@ -161,6 +272,26 @@ function parseToolOutput(messages: LlmChatMessage[], name: string): Record<strin
   }
 }
 
+/** 预读取的工单上下文会随初始消息传入，Mock 也必须使用它避免重复 getTicket。 */
+function parsePreloadedTicketContext(messages: LlmChatMessage[]) {
+  const userMessage = messages.find((item) => item.role === "user");
+  if (!userMessage || userMessage.role !== "user") {
+    return undefined;
+  }
+
+  const raw = userMessage.content.match(/预读取工单上下文：(\{[\s\S]*?\})\n\nPlanner 计划：/)?.[1];
+  if (!raw) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function parseToolOutputArray(messages: LlmChatMessage[], name: string): Array<Record<string, unknown>> | undefined {
   const message = [...messages].reverse().find((item) => item.role === "tool" && item.name === name);
 
@@ -190,6 +321,11 @@ function hasToolOutput(messages: LlmChatMessage[], name: string) {
   });
 }
 
+/** Action Planner 追加动作后，Mock 必须服从当前计划而非只看初始用户措辞。 */
+function hasPlannedAction(messages: LlmChatMessage[], toolName: string) {
+  return messages.some((message) => message.role === "system" && message.content.includes(`\"${toolName}\"`));
+}
+
 function getLastToolError(messages: LlmChatMessage[], name: string) {
   const message = [...messages].reverse().find((item) => item.role === "tool" && item.name === name);
 
@@ -207,8 +343,12 @@ function getLastToolError(messages: LlmChatMessage[], name: string) {
 
 function extractUserTask(messages: LlmChatMessage[]) {
   const userMessage = [...messages].reverse().find((item) => item.role === "user");
+  if (userMessage?.role !== "user") {
+    return "";
+  }
 
-  return userMessage?.role === "user" ? userMessage.content : "";
+  // 初始消息还会携带 Planner 计划和预读取上下文；意图判断只能使用用户原始任务行。
+  return userMessage.content.match(/用户任务：\s*([^\n]+)/)?.[1] ?? userMessage.content;
 }
 
 function extractTicketIdFromMessages(messages: LlmChatMessage[]) {
@@ -327,12 +467,13 @@ function buildMockChatMessage(input: GenerateChatInput, errorMessage?: string): 
   }
 
   const requestedTicketId = extractTicketIdFromMessages(input.messages);
-  const ticket = parseToolOutput(input.messages, "getTicket");
+  const ticket = parseToolOutput(input.messages, "getTicket") ?? parsePreloadedTicketContext(input.messages);
   const order = parseToolOutput(input.messages, "getOrder");
   const policyKeyword = createPolicyKeyword(task, input.messages);
-  const shouldWriteRefund = isRefundTask(task);
+  const shouldWriteRefund = isRefundTask(task) || hasPlannedAction(input.messages, "createRefund");
 
-  if (!hasToolOutput(input.messages, "getTicket")) {
+  // 工单可能已在 Planner 前预读取并作为上下文传入，此时无需重复调用 getTicket。
+  if (!ticket) {
     return { toolCalls: [createMockToolCall("getTicket", { ticketId: requestedTicketId })] };
   }
 

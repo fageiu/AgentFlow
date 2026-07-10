@@ -1,10 +1,26 @@
-import type { AgentStep } from "@agentflow/shared";
+import type { AgentPlan, AgentPlanStep, AgentStep } from "@agentflow/shared";
 import { buildStepErrorSummary } from "./errors";
 
 export interface ParsedStepDetail {
   raw: string;
   data?: Record<string, unknown>;
 }
+
+export type CompactTraceItem =
+  | {
+      kind: "plan" | "replan";
+      step: AgentStep;
+      plan: AgentPlan;
+      observation?: string;
+    }
+  | {
+      kind: "read_group";
+      steps: AgentStep[];
+    }
+  | {
+      kind: "step";
+      step: AgentStep;
+    };
 
 const stepTypeLabels: Record<AgentStep["type"], string> = {
   plan: "计划",
@@ -23,6 +39,23 @@ const stepStatusLabels: Record<NonNullable<AgentStep["status"]>, string> = {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isAgentPlanStep(value: unknown): value is AgentPlanStep {
+  return isPlainObject(value)
+    && typeof value.id === "string"
+    && typeof value.title === "string"
+    && typeof value.objective === "string"
+    && Array.isArray(value.allowedTools)
+    && value.allowedTools.every((tool) => typeof tool === "string");
+}
+
+function isAgentPlan(value: unknown): value is AgentPlan {
+  return isPlainObject(value)
+    && value.version === 1
+    && typeof value.summary === "string"
+    && Array.isArray(value.steps)
+    && value.steps.every(isAgentPlanStep);
 }
 
 function toCompactText(value: unknown): string {
@@ -65,6 +98,72 @@ export function parseStepDetail(detail: string): ParsedStepDetail {
       raw: detail,
     };
   }
+}
+
+/** 从计划或重规划 observation 中提取结构化计划，供紧凑执行流展示。 */
+export function getStepPlan(step: AgentStep) {
+  const detail = parseStepDetail(step.detail).data;
+  if (isAgentPlan(detail)) {
+    return { plan: detail };
+  }
+
+  if (detail && isAgentPlan(detail.remainingPlan)) {
+    return {
+      plan: detail.remainingPlan,
+      observation: typeof detail.observation === "string" ? detail.observation : undefined,
+    };
+  }
+
+  return undefined;
+}
+
+/**
+ * 将 trace 转换成面向业务用户的紧凑记录：连续只读核查合并，计划与重规划单独呈现。
+ * 原始 AgentStep 仍保留在详情里，避免牺牲审计信息。
+ */
+export function buildCompactTraceItems(steps: AgentStep[]): CompactTraceItem[] {
+  const items: CompactTraceItem[] = [];
+  const readTools = new Set(["getTicket", "getCustomer", "getOrder", "searchPolicy"]);
+
+  for (let index = 0; index < steps.length;) {
+    const step = steps[index];
+    const planDetail = getStepPlan(step);
+
+    if (planDetail) {
+      items.push({
+        kind: step.type === "plan" ? "plan" : "replan",
+        step,
+        plan: planDetail.plan,
+        observation: planDetail.observation,
+      });
+      index += 1;
+      continue;
+    }
+
+    if (step.type === "tool_call" && step.status === "completed" && step.toolName && readTools.has(step.toolName)
+      && step.title !== "读取工单上下文（用于制定计划）") {
+      const groupedSteps: AgentStep[] = [step];
+      index += 1;
+
+      while (index < steps.length) {
+        const candidate = steps[index];
+        if (candidate.type !== "tool_call" || candidate.status !== "completed" || !candidate.toolName
+          || !readTools.has(candidate.toolName)) {
+          break;
+        }
+        groupedSteps.push(candidate);
+        index += 1;
+      }
+
+      items.push({ kind: "read_group", steps: groupedSteps });
+      continue;
+    }
+
+    items.push({ kind: "step", step });
+    index += 1;
+  }
+
+  return items;
 }
 
 export function getStepTypeLabel(type: AgentStep["type"]) {

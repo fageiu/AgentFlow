@@ -80,9 +80,31 @@ export function searchPolicy(keyword: string) {
   return policy;
 }
 
-/** 更新工单状态，模拟 Agent 对业务系统产生真实状态变更。 */
+/**
+ * 更新工单状态，并校验退款状态与工单状态的一致性。
+ * 关键状态不能只由 LLM 决定，避免退款未创建或已被拒绝时仍把工单写成待审批。
+ */
 export function updateTicketStatus(ticketId: string, status: TicketStatus) {
   const ticket = getTicket(ticketId);
+
+  if (ticket.status === status) {
+    return ticket;
+  }
+
+  const order = getOrder(ticket.orderId);
+  const requiredRefundStatus: Partial<Record<TicketStatus, RefundStatus>> = {
+    waiting_approval: "pending_approval",
+    refunded: "created",
+    rejected: "rejected",
+  };
+  const requiredStatus = requiredRefundStatus[status];
+
+  if (requiredStatus && order.refundStatus !== requiredStatus) {
+    throw new Error(
+      `Cannot update ticket ${ticketId} to ${status}: order ${order.id} refund status must be ${requiredStatus}, current is ${order.refundStatus}.`,
+    );
+  }
+
   ticket.status = status;
   return ticket;
 }

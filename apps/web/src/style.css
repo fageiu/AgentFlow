@@ -889,19 +889,288 @@ button:disabled {
   margin: 10px 0 0;
 }
 
+/* 紧凑执行流：默认呈现为命令行式进度记录，审批与异常才提升为重点卡片。 */
+.run-flow.embedded {
+  gap: 8px;
+  border-color: #dce5ec;
+  border-radius: 10px;
+  padding: 11px 12px;
+  background: linear-gradient(180deg, #ffffff, #fbfcfd);
+}
+
+.run-flow-header {
+  padding: 0 2px 7px;
+  border-bottom: 1px solid #edf1f4;
+}
+
+.run-flow-header > span {
+  color: #0f766e;
+  background: #ecfdf5;
+}
+
+.run-flow-list {
+  gap: 2px;
+}
+
+.execution-plan,
+.execution-read-group {
+  border: 1px solid #e4ebf0;
+  border-radius: 7px;
+  background: #f8fafb;
+}
+
+.execution-plan summary,
+.execution-read-group summary {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 10px;
+  color: #1e293b;
+  cursor: pointer;
+  list-style: none;
+}
+
+.execution-plan summary::-webkit-details-marker,
+.execution-read-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.execution-plan summary strong,
+.execution-read-group summary strong {
+  margin-right: 7px;
+  font-size: 13px;
+}
+
+.execution-plan summary small,
+.execution-read-group summary small {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.execution-plan-mark {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 50%;
+  color: #0f766e;
+  background: #d1fae5;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.execution-plan[open] .execution-plan-mark {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.execution-plan-summary,
+.execution-plan-observation {
+  margin: 0 10px 8px 37px;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.execution-plan-observation {
+  border-left: 2px solid #93c5fd;
+  padding-left: 8px;
+  color: #1e40af;
+}
+
+.execution-plan-list,
+.execution-read-group ul {
+  display: grid;
+  gap: 4px;
+  margin: 0 10px 10px 37px;
+  padding: 0;
+  list-style: none;
+}
+
+.execution-plan-list li,
+.execution-read-group li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  color: #334155;
+  font-size: 12px;
+}
+
+.execution-plan-list li::before,
+.execution-read-group li::before {
+  content: "·";
+  color: #94a3b8;
+  font-weight: 900;
+}
+
+.execution-plan-list li span,
+.execution-read-group li span {
+  flex: 1 1 auto;
+}
+
+.execution-plan-list li small,
+.execution-read-group li small {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+}
+
+/* 流式等待是当前活动提示，不再以步骤卡片抢占阅读空间。 */
+.streaming-activity {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  min-height: 28px;
+  padding: 3px 4px 1px 28px;
+  color: #1e3a8a;
+  font-size: 12px;
+}
+
+.streaming-activity strong {
+  font-weight: 800;
+}
+
+.streaming-activity small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.streaming-cursor {
+  width: 7px;
+  height: 14px;
+  background: #2563eb;
+  animation: streaming-cursor-blink 1s steps(2, start) infinite;
+}
+
+@keyframes streaming-cursor-blink {
+  50% {
+    opacity: 0.18;
+  }
+}
+
+.cli-trace-row {
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  padding: 1px 0 5px;
+}
+
+.cli-trace-row .run-flow-rail::after {
+  top: 24px;
+  bottom: -6px;
+  width: 1px;
+  background: #e2e8f0;
+}
+
+.cli-trace-row .run-flow-dot {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  color: #0f766e;
+  background: #d1fae5;
+  font-size: 12px;
+}
+
+.cli-trace-row.run-flow-step-running .run-flow-dot,
+.cli-trace-row.run-flow-step-pending .run-flow-dot {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.cli-trace-row.run-flow-step-failed .run-flow-dot {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.cli-trace-row .run-flow-step-main {
+  display: block;
+  min-height: 24px;
+  border: 0;
+  border-radius: 0;
+  padding: 1px 0;
+  background: transparent;
+}
+
+.cli-trace-row .run-flow-step-line {
+  min-height: 22px;
+  align-items: center;
+}
+
+.cli-trace-row .run-flow-step-title strong {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.cli-trace-row .run-flow-step-meta {
+  gap: 4px;
+  font-size: 11px;
+}
+
+.cli-trace-row .run-flow-step-meta span {
+  padding: 1px 5px;
+  background: transparent;
+}
+
+.cli-trace-row .run-flow-step-meta .run-flow-tool {
+  color: #64748b;
+  background: transparent;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+}
+
+.cli-trace-row .run-flow-step-summary {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.cli-trace-row.run-flow-step-approval .run-flow-step-main,
+.cli-trace-row.run-flow-step-failed .run-flow-step-main {
+  border: 1px solid #fde68a;
+  border-radius: 7px;
+  padding: 9px 10px;
+  background: #fffbeb;
+}
+
+.cli-trace-row.run-flow-step-failed .run-flow-step-main {
+  border-color: #fecaca;
+  background: #fffafa;
+}
+
+/* 已完成的审批仅保留为审计记录；只有待审批时才占用强调区块。 */
+.cli-trace-row.run-flow-step-approval.run-flow-step-completed .run-flow-step-main {
+  border: 0;
+  border-radius: 0;
+  padding: 1px 0;
+  background: transparent;
+}
+
+.approval-preview {
+  margin: 7px 0 0;
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.cli-trace-row .run-flow-detail {
+  margin-top: 7px;
+}
+
 .approval-actions.inline {
   margin-top: 0;
 }
 
 .agent-final-response {
   display: grid;
-  gap: 10px;
+  gap: 9px;
   width: min(900px, 100%);
-  border: 1px solid #d7e1ea;
-  border-left: 4px solid #1f6feb;
-  border-radius: 8px;
-  padding: 12px;
-  background: #ffffff;
+  border: 1px solid #dce5ec;
+  border-left: 3px solid #0f766e;
+  border-radius: 9px;
+  padding: 11px 12px;
+  background: #fcfefd;
 }
 
 .agent-final-header {
@@ -915,11 +1184,34 @@ button:disabled {
   display: block;
   margin-top: 2px;
   color: #172026;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.35;
 }
 
-.agent-final-header p {
+.agent-final-status {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.agent-final-status.status-completed {
+  color: #0f766e;
+  background: #d1fae5;
+}
+
+.agent-final-status.status-failed {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.agent-final-status.status-cancelled {
+  color: #475569;
+  background: #e2e8f0;
+}
+
+.agent-final-description {
   margin: 5px 0 0;
   color: #475569;
   font-size: 13px;
@@ -931,13 +1223,47 @@ button:disabled {
 }
 
 .agent-final-message {
+  display: grid;
+  gap: 5px;
   margin: 0;
-  border-left: 3px solid #16a34a;
-  padding-left: 10px;
-  color: #166534;
+  color: #334155;
   font-size: 13px;
   line-height: 1.6;
-  white-space: pre-wrap;
+}
+
+.agent-final-message > p,
+.agent-final-more > p {
+  margin: 0;
+  padding-left: 12px;
+  position: relative;
+}
+
+.agent-final-message > p::before,
+.agent-final-more > p::before {
+  content: "›";
+  position: absolute;
+  left: 0;
+  color: #0f766e;
+  font-weight: 900;
+}
+
+.agent-final-more {
+  margin-top: 2px;
+  border-top: 1px dashed #d7e1ea;
+  padding-top: 7px;
+}
+
+.agent-final-more summary {
+  width: fit-content;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.agent-final-more[open] {
+  display: grid;
+  gap: 5px;
 }
 
 .evaluation-empty-state {

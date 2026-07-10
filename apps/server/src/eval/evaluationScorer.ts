@@ -85,6 +85,22 @@ export function scoreEvaluationCase(input: {
     );
   }
 
+  if (expectations.requiresPlan != null) {
+    const hasPlan = Boolean(input.run?.plan?.steps.length);
+    assertions.push(
+      createAssertion(
+        "planner-contract",
+        "结构化 Planner 计划符合预期",
+        hasPlan === expectations.requiresPlan,
+        expectations.requiresPlan ? "present" : "not-present",
+        hasPlan ? "present" : "not-present",
+        expectations.requiresPlan
+          ? "run 应保存可审计的结构化 Planner 计划，并由 Executor 据此执行。"
+          : "该 case 不应依赖 Planner 计划。",
+      ),
+    );
+  }
+
   for (const toolName of expectations.requiredTools ?? []) {
     assertions.push(
       createAssertion(

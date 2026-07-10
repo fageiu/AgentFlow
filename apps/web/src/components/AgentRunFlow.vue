@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import type { AgentRun, AgentStep } from "@agentflow/shared";
 import AgentStepDetail from "./AgentStepDetail.vue";
+import { buildCompactTraceItems } from "../utils/trace";
 
-defineProps<{
+const props = defineProps<{
   steps: AgentStep[];
   status?: AgentRun["status"] | "idle";
   messageId: string;
@@ -12,51 +14,89 @@ defineProps<{
 defineEmits<{
   resolveApproval: [action: "approve" | "reject", messageId: string];
 }>();
+
+const compactItems = computed(() => buildCompactTraceItems(props.steps));
+const completedCount = computed(() => props.steps.filter((step) => step.status === "completed").length);
+const streamingActivity = computed(() => {
+  const lastStep = props.steps.at(-1);
+
+  if (!lastStep) {
+    return "正在制定处理方案";
+  }
+
+  if (lastStep.status === "failed") {
+    return "正在处理异常并调整方案";
+  }
+
+  if (lastStep.type === "plan") {
+    return "正在按方案核查业务信息";
+  }
+
+  if (lastStep.type === "observation") {
+    return "正在根据执行观察继续处理";
+  }
+
+  return "正在执行下一步";
+});
 </script>
 
 <template>
   <section class="run-flow embedded" aria-label="Agent 执行流程">
     <div class="run-flow-header">
       <div>
-        <span class="run-flow-kicker">Execution Flow</span>
-        <strong>任务执行流程</strong>
+        <span class="run-flow-kicker">Agent activity</span>
+        <strong>处理进度</strong>
       </div>
-      <span>{{ status === "running" ? `已记录 ${steps.length} 步` : `${steps.length} 步` }}</span>
+      <span>{{ status === "running" ? `${completedCount} 项已完成` : `${completedCount} / ${steps.length} 完成` }}</span>
     </div>
 
     <div class="run-flow-list">
-      <AgentStepDetail
-        v-for="(step, index) in steps"
-        :key="step.id"
-        :step="step"
-        :index="index"
-        :message-id="messageId"
-        :resolving-approval="resolvingApproval"
-        @resolve-approval="$emit('resolveApproval', $event, messageId)"
-      />
+      <template v-for="(item, index) in compactItems" :key="item.kind === 'read_group' ? item.steps[0]?.id : item.step.id">
+        <details v-if="item.kind === 'plan' || item.kind === 'replan'" class="execution-plan" :open="item.kind === 'replan'">
+          <summary>
+            <span class="execution-plan-mark">{{ item.kind === "plan" ? "✓" : "↻" }}</span>
+            <span>
+              <strong>{{ item.kind === "plan" ? "已制定处理方案" : "已根据观察调整方案" }}</strong>
+              <small>{{ item.kind === "plan" ? `${item.plan.steps.length} 个步骤` : "剩余步骤已更新" }}</small>
+            </span>
+          </summary>
+          <p v-if="item.observation" class="execution-plan-observation">{{ item.observation }}</p>
+          <p class="execution-plan-summary">{{ item.plan.summary }}</p>
+          <ol class="execution-plan-list">
+            <li v-for="planStep in item.plan.steps" :key="planStep.id">
+              <span>{{ planStep.title }}</span>
+              <small>{{ planStep.allowedTools.join(" · ") }}{{ planStep.requiresApproval ? " · 需审批" : "" }}</small>
+            </li>
+          </ol>
+        </details>
 
-      <article v-if="status === 'running'" class="run-flow-step run-flow-step-running run-flow-step-pending">
-        <div class="run-flow-rail">
-          <span class="run-flow-dot">{{ steps.length + 1 }}</span>
-        </div>
+        <details v-else-if="item.kind === 'read_group'" class="execution-read-group">
+          <summary>
+            <span class="execution-plan-mark">✓</span>
+            <span><strong>已完成业务核查</strong><small>{{ item.steps.length }} 项读取</small></span>
+          </summary>
+          <ul>
+            <li v-for="step in item.steps" :key="step.id">
+              <span>{{ step.title }}</span><small>{{ step.toolName }}</small>
+            </li>
+          </ul>
+        </details>
 
-        <div class="run-flow-step-main">
-          <div class="run-flow-step-line">
-            <div class="run-flow-step-title">
-              <span>执行中</span>
-              <strong>{{ steps.length === 0 ? "正在生成执行计划" : "等待下一步执行事件" }}</strong>
-            </div>
+        <AgentStepDetail
+          v-else
+          :step="item.step"
+          :index="index"
+          :message-id="messageId"
+          :resolving-approval="resolvingApproval"
+          @resolve-approval="$emit('resolveApproval', $event, messageId)"
+        />
+      </template>
 
-            <div class="run-flow-step-meta">
-              <span class="run-flow-state">流式等待</span>
-            </div>
-          </div>
-
-          <p class="run-flow-step-summary">
-            {{ steps.length === 0 ? "已建立执行连接，正在等待模型返回第一段计划。" : "上一阶段已写入 trace，正在等待模型、工具或最终回复返回。" }}
-          </p>
-        </div>
-      </article>
+      <div v-if="status === 'running'" class="streaming-activity" role="status" aria-live="polite">
+        <span class="streaming-cursor" aria-hidden="true"></span>
+        <strong>{{ streamingActivity }}</strong>
+        <small>流式执行中</small>
+      </div>
     </div>
   </section>
 </template>

@@ -5,7 +5,6 @@ import { buildStepErrorSummary } from "../utils/errors";
 import {
   getStepStatusLabel,
   getStepSummary,
-  getStepTypeLabel,
   parseStepDetail,
   shouldOpenStepDetail,
 } from "../utils/trace";
@@ -25,22 +24,52 @@ const parsedDetail = computed(() => parseStepDetail(props.step.detail));
 const errorSummary = computed(() => buildStepErrorSummary(props.step));
 const summary = computed(() => getStepSummary(props.step));
 const isDetailOpen = computed(() => shouldOpenStepDetail(props.step));
+const isPendingApproval = computed(() => props.step.approvalRequest?.status === "pending");
+const shouldShowSummary = computed(() => Boolean(errorSummary.value) || isPendingApproval.value || props.step.status !== "completed");
+
+const statusMark = computed(() => {
+  if (isPendingApproval.value) {
+    return "◆";
+  }
+
+  const marks: Record<NonNullable<AgentStep["status"]>, string> = {
+    running: "…",
+    completed: "✓",
+    failed: "!",
+    cancelled: "—",
+  };
+
+  return props.step.status ? marks[props.step.status] : "○";
+});
+
+const approvalPreview = computed(() => {
+  const input = props.step.approvalRequest?.input;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return "请确认该高风险业务操作。";
+  }
+
+  const values = input as Record<string, unknown>;
+  return [
+    values.orderId ? `订单 ${values.orderId}` : "",
+    values.amount != null ? `金额 ¥${values.amount}` : "",
+    values.reason ? String(values.reason) : "",
+  ].filter(Boolean).join(" · ");
+});
 </script>
 
 <template>
   <article
-    class="run-flow-step"
+    class="run-flow-step cli-trace-row"
     :class="[`run-flow-step-${step.type}`, `run-flow-step-${step.status ?? 'pending'}`]"
   >
     <div class="run-flow-rail">
-      <span class="run-flow-dot">{{ index + 1 }}</span>
+      <span class="run-flow-dot">{{ statusMark }}</span>
     </div>
 
     <div class="run-flow-step-main">
       <div class="run-flow-step-line">
-        <div class="run-flow-step-title">
-          <span>{{ getStepTypeLabel(step.type) }}</span>
-          <strong>{{ step.title }}</strong>
+          <div class="run-flow-step-title">
+            <strong>{{ step.title }}</strong>
         </div>
 
         <div class="run-flow-step-meta">
@@ -50,7 +79,9 @@ const isDetailOpen = computed(() => shouldOpenStepDetail(props.step));
         </div>
       </div>
 
-      <p class="run-flow-step-summary">{{ summary }}</p>
+      <p v-if="shouldShowSummary" class="run-flow-step-summary">{{ summary }}</p>
+
+      <p v-if="isPendingApproval" class="approval-preview">{{ approvalPreview }}</p>
 
       <div v-if="errorSummary" class="step-error-summary compact">
         <strong>{{ errorSummary.title }}</strong>
@@ -83,7 +114,7 @@ const isDetailOpen = computed(() => shouldOpenStepDetail(props.step));
         <pre>{{ step.detail }}</pre>
       </details>
 
-      <div v-if="step.approvalRequest?.status === 'pending'" class="approval-actions inline">
+      <div v-if="isPendingApproval" class="approval-actions inline">
         <button
           type="button"
           class="approve-button"
