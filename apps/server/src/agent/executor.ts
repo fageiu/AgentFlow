@@ -601,12 +601,14 @@ async function buildReplanStep(
   requiredFirstTool: string,
   observation: string,
   index: number,
+  ticketContext?: unknown,
 ) {
   const replan = await measureStep(() =>
     generateText({
       ...buildPlanPrompt(task, {
         completedTools: completedSteps.flatMap((step) => step.allowedTools),
         observation,
+        ticketContext,
       }),
       temperature: 0.1,
     }),
@@ -922,7 +924,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
     throwIfRunCancelled(run);
     let activePlanStep = activePlan.steps[activePlanStepIndex];
 
-    if (!activePlanStep && !actionDecisionCompleted) {
+    if (!activePlanStep && !actionDecisionCompleted && ticketContext) {
       const actionPlan = await buildActionPlanStep(run, ticketContext.ticket, stepIndex++);
       recordLlmUsage(run, actionPlan.step.modelName ?? "unknown", actionPlan.step.tokenUsage ?? createEmptyTokenUsage());
       actionDecisionCompleted = true;
@@ -1048,6 +1050,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
               toolCall.name,
               traceError.detailMessage ?? traceError.message,
               stepIndex++,
+              ticketContext?.ticket,
             );
             recordLlmUsage(run, replanned.step.modelName ?? "unknown", replanned.step.tokenUsage ?? createEmptyTokenUsage());
             activePlan = {

@@ -1019,6 +1019,174 @@ button:disabled {
   font-size: 10px;
 }
 
+/* 计划与执行记录合并为一张 checklist，避免重复展示工具调用。 */
+.plan-progress-card {
+  border: 1px solid #dce5ec;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fbfcfd;
+}
+
+.plan-progress-heading {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  padding: 0 2px 6px;
+  border-bottom: 1px solid #edf1f4;
+}
+
+.plan-progress-heading strong {
+  color: #1e293b;
+  font-size: 13px;
+}
+
+.plan-progress-heading span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.plan-progress-list {
+  display: grid;
+  gap: 1px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-progress-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  min-height: 29px;
+  padding: 2px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.plan-progress-mark {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid #d5dee7;
+  border-radius: 50%;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.plan-progress-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-progress-item > small {
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.plan-progress-completed {
+  color: #475569;
+}
+
+.plan-progress-completed .plan-progress-mark {
+  border-color: #99f6e4;
+  color: #0f766e;
+  background: #ecfdf5;
+}
+
+.plan-progress-current,
+.plan-progress-running {
+  border-radius: 5px;
+  color: #1e3a8a;
+  background: #eff6ff;
+}
+
+.plan-progress-current .plan-progress-mark,
+.plan-progress-running .plan-progress-mark {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.plan-progress-current > small,
+.plan-progress-running > small {
+  color: #1d4ed8;
+}
+
+.plan-progress-approval {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  margin-top: 3px;
+  border-radius: 5px;
+  padding: 6px 5px;
+  color: #92400e;
+  background: #fffbeb;
+}
+
+.plan-progress-approval .plan-progress-mark {
+  border-color: #fcd34d;
+  color: #b45309;
+  background: #fef3c7;
+}
+
+.plan-progress-approval > small {
+  color: #b45309;
+}
+
+.plan-progress-controls {
+  grid-column: 2 / -1;
+  margin: 0;
+  padding: 2px 0 0;
+}
+
+.plan-progress-failed {
+  color: #b91c1c;
+}
+
+.plan-progress-failed .plan-progress-mark {
+  border-color: #fecaca;
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+.plan-progress-rejected {
+  color: #9a3412;
+}
+
+.plan-progress-rejected .plan-progress-mark {
+  border-color: #fdba74;
+  color: #c2410c;
+  background: #fff7ed;
+}
+
+.plan-progress-rejected > small {
+  color: #c2410c;
+}
+
+.plan-progress-skipped {
+  color: #94a3b8;
+}
+
+.plan-progress-skipped .plan-progress-mark {
+  border-color: #e2e8f0;
+  color: #94a3b8;
+  background: #f8fafc;
+}
+
+.plan-progress-error {
+  grid-column: 2 / -1;
+  margin: -2px 0 3px;
+  color: #b91c1c;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 /* 流式等待是当前活动提示，不再以步骤卡片抢占阅读空间。 */
 .streaming-activity {
   display: flex;
@@ -1216,6 +1384,37 @@ button:disabled {
   color: #475569;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.agent-conclusion-grid {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.agent-conclusion-grid > div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 9px;
+  padding: 5px 0;
+  border-bottom: 1px dashed #e2e8f0;
+}
+
+.agent-conclusion-grid > div:last-child {
+  border-bottom: 0;
+}
+
+.agent-conclusion-grid dt {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.agent-conclusion-grid dd {
+  margin: 0;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .agent-final-response .agent-error-summary {

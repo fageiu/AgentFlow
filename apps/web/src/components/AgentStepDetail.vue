@@ -5,8 +5,6 @@ import { buildStepErrorSummary } from "../utils/errors";
 import {
   getStepStatusLabel,
   getStepSummary,
-  parseStepDetail,
-  shouldOpenStepDetail,
 } from "../utils/trace";
 
 const props = defineProps<{
@@ -20,10 +18,8 @@ defineEmits<{
   resolveApproval: [action: "approve" | "reject", messageId: string];
 }>();
 
-const parsedDetail = computed(() => parseStepDetail(props.step.detail));
 const errorSummary = computed(() => buildStepErrorSummary(props.step));
 const summary = computed(() => getStepSummary(props.step));
-const isDetailOpen = computed(() => shouldOpenStepDetail(props.step));
 const isPendingApproval = computed(() => props.step.approvalRequest?.status === "pending");
 const shouldShowSummary = computed(() => Boolean(errorSummary.value) || isPendingApproval.value || props.step.status !== "completed");
 
@@ -88,31 +84,6 @@ const approvalPreview = computed(() => {
         <p>{{ errorSummary.message }}</p>
         <small>{{ errorSummary.advice }}</small>
       </div>
-
-      <details class="run-flow-detail" :open="isDetailOpen">
-        <summary>查看原始细节</summary>
-
-        <dl v-if="parsedDetail.data" class="run-flow-detail-grid">
-          <div v-if="parsedDetail.data.toolCallId">
-            <dt>Tool Call</dt>
-            <dd>{{ parsedDetail.data.toolCallId }}</dd>
-          </div>
-          <div v-if="parsedDetail.data.riskLevel">
-            <dt>风险等级</dt>
-            <dd>{{ parsedDetail.data.riskLevel }}</dd>
-          </div>
-          <div v-if="step.modelName">
-            <dt>模型</dt>
-            <dd>{{ step.modelName }}</dd>
-          </div>
-          <div v-if="step.tokenUsage">
-            <dt>Token</dt>
-            <dd>{{ step.tokenUsage.totalTokens }}</dd>
-          </div>
-        </dl>
-
-        <pre>{{ step.detail }}</pre>
-      </details>
 
       <div v-if="isPendingApproval" class="approval-actions inline">
         <button

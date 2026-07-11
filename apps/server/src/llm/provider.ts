@@ -121,7 +121,9 @@ function buildMockPlan(task: string) {
 
 /** Mock 决策阶段同样只根据已传入的工单与规则证据决定是否进入退款流程。 */
 function buildMockActionPlan(evidence: string) {
-  const shouldRefund = /退款|refund/i.test(evidence) && !/发票|invoice/i.test(evidence);
+  const hasMatchedRefundRule = /VIP 客户退款规则|"matchedKeyword"\s*:\s*"refund"|"keyword"\s*:\s*"refund"/i.test(evidence);
+  const hasNonRefundScenario = /发票|invoice|升级|合同升级|sla|服务不可用|取消|cancel/i.test(evidence);
+  const shouldRefund = hasMatchedRefundRule || (/退款|refund/i.test(evidence) && !hasNonRefundScenario);
 
   if (!shouldRefund) {
     return {
@@ -197,31 +199,44 @@ function buildMockText(input: GenerateTextInput) {
 
   if (input.system.includes("[FINAL_CONCLUSION]")) {
     const ticketId = input.user.match(/T-\d+/i)?.[0]?.toUpperCase() ?? "该工单";
+    const task = input.user.match(/用户任务：\s*([^\n]+)/)?.[1] ?? `处理 ${ticketId}`;
     const candidate = input.user.match(/候选结论：([\s\S]*?)\n\n执行步骤：/)?.[1]?.trim();
     const statusMatch = input.user.match(/"status"\s*:\s*"([^"]+)"/);
     const status = statusMatch?.[1];
 
     if (candidate && /已查询|查询工单|结果如下|只读查询/.test(candidate)) {
-      return candidate
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .slice(0, 5)
-        .join("\n");
+      const ticketIds = [...new Set(candidate.match(/T-\d+/gi)?.map((item) => item.toUpperCase()) ?? [])];
+      return [
+        `工单需求：${task}`,
+        `处理结果：已完成只读查询，${ticketIds.length ? `返回工单 ${ticketIds.join("、")}。` : "已返回匹配工单。"}`,
+        "处理依据：已通过工单查询工具读取真实业务数据，未执行写入操作。",
+        "下一步：如需处理某张工单，请提供工单号或明确业务目标。",
+      ].join("\n");
+    }
+
+    if (/人工已拒绝|审批拒绝/.test(input.user)) {
+      return [
+        `工单需求：${task}`,
+        `处理结果：审批已拒绝，未创建退款记录，${ticketId} 保持原业务状态。`,
+        "处理依据：退款属于高风险操作，人工审批未通过，因此后续依赖状态更新已跳过。",
+        "下一步：请根据拒绝原因与客户沟通；如需重新处理，可补充材料后再次发起。",
+      ].join("\n");
     }
 
     if (/未创建退款|未执行退款|未更新工单状态|未执行写入/.test(input.user)) {
       return [
-        `本次任务已完成，已基于真实工具结果处理 ${ticketId}。`,
-        "已确认该任务不需要退款或高风险状态变更，未创建退款记录。",
-        "已完成只读核查，可继续按业务规则与客户沟通后续处理。",
+        `工单需求：${task}`,
+        "处理结果：已完成核查，未创建退款记录，也未更新工单状态。",
+        "处理依据：已读取工单、客户、订单及适用规则，现有证据不支持进入退款或高风险变更流程。",
+        "下一步：可按命中规则与客户沟通后续处理意见。",
       ].join("\n");
     }
 
     return [
-      `本次任务已完成，已基于真实工具结果处理 ${ticketId}。`,
-      status ? `当前关键业务状态为 ${status}。` : "已完成必要的业务核查和处理判断。",
-      "如需继续处理，请根据当前业务状态执行下一步人工确认或客户沟通。",
+      `工单需求：${task}`,
+      status ? `处理结果：已完成必要处理，当前关键业务状态为 ${status}。` : "处理结果：已完成必要业务核查和处理判断。",
+      "处理依据：已读取工单、客户、订单及命中规则，并按审批边界执行必要动作。",
+      "下一步：请根据当前业务状态完成后续人工确认或客户沟通。",
     ].join("\n");
   }
 
@@ -371,7 +386,8 @@ function createPolicyKeyword(task: string, messages: LlmChatMessage[]) {
   }
 
   if (/发票/.test(task)) {
-    return "发票";
+    // 模拟真实模型更常见的自然语言关键词，验证后端政策检索能完成语义归一化。
+    return "发票补开";
   }
 
   if (/升级|合同/.test(task)) {

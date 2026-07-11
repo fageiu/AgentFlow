@@ -71,13 +71,41 @@ export function getOrder(orderId: string) {
   return order;
 }
 
-/** 根据关键词检索模拟政策规则，后续可替换为 RAG 或数据库检索。 */
+/**
+ * 根据业务表达检索模拟政策规则。
+ * 先精确命中，再使用别名和包含匹配，避免 LLM 使用“发票补开”这类自然语言时因规则库 keyword 不完全相等而失败。
+ */
 export function searchPolicy(keyword: string) {
-  const policy = policies.find((item) => item.keyword === keyword);
+  const normalizedKeyword = keyword.trim().toLowerCase();
+  const policyAliases: Record<string, string> = {
+    "发票补开": "发票",
+    "补开发票": "发票",
+    "发票开具": "发票",
+    "开票": "发票",
+    "服务不可用": "sla",
+    "服务中断": "sla",
+    "补偿": "sla",
+    "合同升级": "upgrade",
+    "升级咨询": "upgrade",
+    "升级": "upgrade",
+    "订单取消": "cancel",
+  };
+  const aliasMatch = Object.entries(policyAliases)
+    .sort(([left], [right]) => right.length - left.length)
+    .find(([phrase]) => normalizedKeyword.includes(phrase))?.[1];
+  const canonicalKeyword = policyAliases[normalizedKeyword] ?? aliasMatch ?? normalizedKeyword;
+  const policy = policies.find((item) => item.keyword === canonicalKeyword)
+    ?? policies.find((item) => canonicalKeyword.includes(item.keyword) || item.keyword.includes(canonicalKeyword));
+
   if (!policy) {
     throw new Error(`Policy not found: ${keyword}`);
   }
-  return policy;
+
+  return {
+    ...policy,
+    queryKeyword: keyword,
+    matchedKeyword: policy.keyword,
+  };
 }
 
 /**

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { AgentRun } from "@agentflow/shared";
-import { splitFinalResponseForDisplay } from "../utils/finalResponse";
+import { buildBusinessConclusion, getTicketRequirement } from "../utils/finalResponse";
 import { getRunStatusLabel } from "../utils/labels";
-import AgentErrorSummary from "./AgentErrorSummary.vue";
+import { buildAgentErrorSummary } from "../utils/errors";
 
 const props = defineProps<{
   run?: AgentRun;
@@ -11,10 +11,23 @@ const props = defineProps<{
   finalMessage?: string;
 }>();
 
-const conclusionLines = computed(() => splitFinalResponseForDisplay(props.finalMessage));
-const visibleConclusionLines = computed(() => conclusionLines.value.slice(0, 3));
-const hiddenConclusionLines = computed(() => conclusionLines.value.slice(3));
 const hasError = computed(() => Boolean(props.run?.error || props.fallbackErrorMessage));
+const errorSummary = computed(() => buildAgentErrorSummary(props.run?.error, props.fallbackErrorMessage));
+const ticketRequirement = computed(() => getTicketRequirement(props.run?.steps));
+const conclusionSections = computed(() => {
+  const task = props.run?.task ?? "未提供工单任务";
+
+  if (hasError.value) {
+    return [
+      { label: "工单需求" as const, value: ticketRequirement.value ?? task },
+      { label: "处理结果" as const, value: `未完成：${errorSummary.value?.message ?? "执行过程中发生错误。"}` },
+      { label: "处理依据" as const, value: errorSummary.value?.title ?? "执行 trace 中出现失败步骤。" },
+      { label: "下一步" as const, value: errorSummary.value?.advice ?? "请修正问题后重新发起处理。" },
+    ];
+  }
+
+  return buildBusinessConclusion(task, props.finalMessage, ticketRequirement.value);
+});
 
 function getResultDescription(run: AgentRun | undefined) {
   if (run?.status === "cancelled") {
@@ -34,7 +47,7 @@ function getResultDescription(run: AgentRun | undefined) {
 </script>
 
 <template>
-  <section v-if="props.run || fallbackErrorMessage || conclusionLines.length" class="agent-final-response">
+  <section v-if="props.run || fallbackErrorMessage || conclusionSections.length" class="agent-final-response">
     <div class="agent-final-header">
       <div>
         <span class="run-flow-kicker">Outcome</span>
@@ -43,21 +56,13 @@ function getResultDescription(run: AgentRun | undefined) {
       <span class="agent-final-status" :class="`status-${props.run?.status ?? 'idle'}`">{{ getRunStatusLabel(props.run?.status) }}</span>
     </div>
 
-    <AgentErrorSummary
-      v-if="hasError"
-      :error="props.run?.error"
-      :fallback-message="fallbackErrorMessage"
-      compact
-    />
+    <p v-if="!hasError && props.run?.status !== 'completed'" class="agent-final-description">{{ getResultDescription(props.run) }}</p>
 
-    <p v-else-if="props.run?.status !== 'completed'" class="agent-final-description">{{ getResultDescription(props.run) }}</p>
-
-    <div v-else-if="conclusionLines.length" class="agent-final-message">
-      <p v-for="line in visibleConclusionLines" :key="line">{{ line }}</p>
-      <details v-if="hiddenConclusionLines.length" class="agent-final-more">
-        <summary>展开完整结论（{{ hiddenConclusionLines.length }} 项）</summary>
-        <p v-for="line in hiddenConclusionLines" :key="line">{{ line }}</p>
-      </details>
-    </div>
+    <dl class="agent-conclusion-grid">
+      <div v-for="section in conclusionSections" :key="section.label">
+        <dt>{{ section.label }}</dt>
+        <dd>{{ section.value }}</dd>
+      </div>
+    </dl>
   </section>
 </template>

@@ -1,8 +1,18 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { AgentRun, AgentStep } from "@agentflow/shared";
+import type { AgentPlanStep, AgentRun, AgentStep } from "@agentflow/shared";
 import AgentStepDetail from "./AgentStepDetail.vue";
-import { buildCompactTraceItems } from "../utils/trace";
+import { buildStepErrorSummary } from "../utils/errors";
+import { buildCompactTraceItems, getStepPlan } from "../utils/trace";
+
+type PlanProgressStatus = "completed" | "failed" | "rejected" | "skipped" | "approval" | "running" | "current" | "pending";
+
+interface PlanProgressItem {
+  step: AgentPlanStep;
+  status: PlanProgressStatus;
+  approvalStep?: AgentStep;
+  errorMessage?: string;
+}
 
 const props = defineProps<{
   steps: AgentStep[];
@@ -16,7 +26,125 @@ defineEmits<{
 }>();
 
 const compactItems = computed(() => buildCompactTraceItems(props.steps));
-const completedCount = computed(() => props.steps.filter((step) => step.status === "completed").length);
+const planProgress = computed(() => {
+  const planSteps: AgentPlanStep[] = [];
+  let wasAdjusted = false;
+
+  for (const traceStep of props.steps) {
+    const planDetail = getStepPlan(traceStep);
+    if (!planDetail) {
+      continue;
+    }
+
+    if (traceStep.type !== "plan") {
+      wasAdjusted = true;
+    }
+
+    for (const planStep of planDetail.plan.steps) {
+      if (!planSteps.some((item) => item.allowedTools[0] === planStep.allowedTools[0])) {
+        planSteps.push(planStep);
+      }
+    }
+  }
+
+  const items: PlanProgressItem[] = planSteps.map((planStep) => {
+    const toolName = planStep.allowedTools[0];
+    const executions = props.steps.filter((step) => step.toolName === toolName && (step.type === "tool_call" || step.type === "approval"));
+    const latest = executions.at(-1);
+    const approvalStep = [...executions].reverse().find((step) => step.approvalRequest?.status === "pending");
+
+    if (approvalStep) {
+      return { step: planStep, status: "approval", approvalStep };
+    }
+    if (latest?.approvalRequest?.status === "rejected") {
+      return { step: planStep, status: "rejected" };
+    }
+    if (latest?.status === "failed") {
+      return {
+        step: planStep,
+        status: "failed",
+        errorMessage: buildStepErrorSummary(latest)?.message ?? "该步骤未完成，请根据提示调整后重试。",
+      };
+    }
+    if (latest?.status === "completed") {
+      return { step: planStep, status: "completed" };
+    }
+    if (latest?.status === "running") {
+      return { step: planStep, status: "running" };
+    }
+    return { step: planStep, status: "pending" };
+  });
+
+  // 审批拒绝后，依赖该动作的后续计划不能继续执行，须明确标记为跳过而非“待执行”。
+  const rejectedIndex = items.findIndex((item) => item.status === "rejected");
+  if (rejectedIndex >= 0 && props.status !== "running") {
+    for (const item of items.slice(rejectedIndex + 1)) {
+      if (item.status === "pending") {
+        item.status = "skipped";
+      }
+    }
+  }
+
+  if (props.status === "running") {
+    const nextItem = items.find((item) => item.status === "pending");
+    if (nextItem) {
+      nextItem.status = "current";
+    }
+  }
+
+  return {
+    items,
+    adjusted: wasAdjusted,
+    completed: items.filter((item) => item.status === "completed").length,
+    rejected: items.filter((item) => item.status === "rejected").length,
+    skipped: items.filter((item) => item.status === "skipped").length,
+  };
+});
+
+const visibleSteps = computed(() => {
+  const plannedTools = new Set(planProgress.value.items.map((item) => item.step.allowedTools[0]));
+
+  return compactItems.value.flatMap((item) => {
+    if (item.kind !== "step") {
+      return [];
+    }
+
+    const step = item.step;
+    if (step.title === "读取工单上下文（用于制定计划）") {
+      return [];
+    }
+    if (step.toolName && plannedTools.has(step.toolName)) {
+      return [];
+    }
+    return [step];
+  });
+});
+
+function getPlanMark(status: PlanProgressStatus) {
+  return {
+    completed: "✓",
+    failed: "!",
+    rejected: "×",
+    skipped: "—",
+    approval: "◆",
+    running: "…",
+    current: "›",
+    pending: "○",
+  }[status];
+}
+
+function getPlanStatusLabel(status: PlanProgressStatus) {
+  return {
+    completed: "已完成",
+    failed: "需处理",
+    rejected: "已拒绝",
+    skipped: "已跳过",
+    approval: "等待审批",
+    running: "执行中",
+    current: "下一步",
+    pending: "待执行",
+  }[status];
+}
 const streamingActivity = computed(() => {
   const lastStep = props.steps.at(-1);
 
@@ -47,44 +175,57 @@ const streamingActivity = computed(() => {
         <span class="run-flow-kicker">Agent activity</span>
         <strong>处理进度</strong>
       </div>
-      <span>{{ status === "running" ? `${completedCount} 项已完成` : `${completedCount} / ${steps.length} 完成` }}</span>
+      <span v-if="planProgress.items.length">
+        {{ planProgress.completed }} 已完成
+        <template v-if="planProgress.rejected"> · {{ planProgress.rejected }} 已拒绝</template>
+        <template v-if="planProgress.skipped"> · {{ planProgress.skipped }} 已跳过</template>
+      </span>
+      <span v-else>{{ status === "running" ? "正在准备" : `${steps.length} 步` }}</span>
     </div>
 
     <div class="run-flow-list">
-      <template v-for="(item, index) in compactItems" :key="item.kind === 'read_group' ? item.steps[0]?.id : item.step.id">
-        <details v-if="item.kind === 'plan' || item.kind === 'replan'" class="execution-plan" :open="item.kind === 'replan'">
-          <summary>
-            <span class="execution-plan-mark">{{ item.kind === "plan" ? "✓" : "↻" }}</span>
-            <span>
-              <strong>{{ item.kind === "plan" ? "已制定处理方案" : "已根据观察调整方案" }}</strong>
-              <small>{{ item.kind === "plan" ? `${item.plan.steps.length} 个步骤` : "剩余步骤已更新" }}</small>
-            </span>
-          </summary>
-          <p v-if="item.observation" class="execution-plan-observation">{{ item.observation }}</p>
-          <p class="execution-plan-summary">{{ item.plan.summary }}</p>
-          <ol class="execution-plan-list">
-            <li v-for="planStep in item.plan.steps" :key="planStep.id">
-              <span>{{ planStep.title }}</span>
-              <small>{{ planStep.allowedTools.join(" · ") }}{{ planStep.requiresApproval ? " · 需审批" : "" }}</small>
-            </li>
-          </ol>
-        </details>
+      <section v-if="planProgress.items.length" class="plan-progress-card" aria-label="处理方案进度">
+        <div class="plan-progress-heading">
+          <strong>{{ planProgress.adjusted ? "处理方案已调整" : "处理方案" }}</strong>
+          <span>{{ planProgress.items.length }} 个步骤</span>
+        </div>
+        <ol class="plan-progress-list">
+          <li
+            v-for="item in planProgress.items"
+            :key="item.step.id"
+            class="plan-progress-item"
+            :class="`plan-progress-${item.status}`"
+          >
+            <span class="plan-progress-mark">{{ getPlanMark(item.status) }}</span>
+            <span class="plan-progress-title">{{ item.step.title }}</span>
+            <small>{{ getPlanStatusLabel(item.status) }}</small>
 
-        <details v-else-if="item.kind === 'read_group'" class="execution-read-group">
-          <summary>
-            <span class="execution-plan-mark">✓</span>
-            <span><strong>已完成业务核查</strong><small>{{ item.steps.length }} 项读取</small></span>
-          </summary>
-          <ul>
-            <li v-for="step in item.steps" :key="step.id">
-              <span>{{ step.title }}</span><small>{{ step.toolName }}</small>
-            </li>
-          </ul>
-        </details>
+            <div v-if="item.status === 'approval'" class="approval-actions inline plan-progress-controls">
+              <button
+                type="button"
+                class="approve-button"
+                :disabled="resolvingApproval"
+                @click="$emit('resolveApproval', 'approve', messageId)"
+              >
+                批准
+              </button>
+              <button
+                type="button"
+                class="reject-button"
+                :disabled="resolvingApproval"
+                @click="$emit('resolveApproval', 'reject', messageId)"
+              >
+                拒绝
+              </button>
+            </div>
+            <p v-if="item.errorMessage" class="plan-progress-error">{{ item.errorMessage }}</p>
+          </li>
+        </ol>
+      </section>
 
+      <template v-for="(step, index) in visibleSteps" :key="step.id">
         <AgentStepDetail
-          v-else
-          :step="item.step"
+          :step="step"
           :index="index"
           :message-id="messageId"
           :resolving-approval="resolvingApproval"
