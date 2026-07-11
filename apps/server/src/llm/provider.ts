@@ -123,7 +123,8 @@ function buildMockPlan(task: string) {
 function buildMockActionPlan(evidence: string) {
   const hasMatchedRefundRule = /VIP 客户退款规则|"matchedKeyword"\s*:\s*"refund"|"keyword"\s*:\s*"refund"/i.test(evidence);
   const hasNonRefundScenario = /发票|invoice|升级|合同升级|sla|服务不可用|取消|cancel/i.test(evidence);
-  const shouldRefund = hasMatchedRefundRule || (/退款|refund/i.test(evidence) && !hasNonRefundScenario);
+  // 工单证据明确属于发票、升级等非退款场景时，错误命中的退款规则不能覆盖业务事实。
+  const shouldRefund = !hasNonRefundScenario && (hasMatchedRefundRule || /退款|refund/i.test(evidence));
 
   if (!shouldRefund) {
     return {
@@ -204,8 +205,9 @@ function buildMockText(input: GenerateTextInput) {
     const statusMatch = input.user.match(/"status"\s*:\s*"([^"]+)"/);
     const status = statusMatch?.[1];
 
-    if (candidate && /已查询|查询工单|结果如下|只读查询/.test(candidate)) {
-      const ticketIds = [...new Set(candidate.match(/T-\d+/gi)?.map((item) => item.toUpperCase()) ?? [])];
+    const hasQueryTrace = /"toolName"\s*:\s*"(?:listTickets|searchTickets)"/.test(input.user);
+    if ((candidate && /已查询|查询工单|结果如下|只读查询/.test(candidate)) || hasQueryTrace) {
+      const ticketIds = [...new Set(input.user.match(/T-\d+/gi)?.map((item) => item.toUpperCase()) ?? [])];
       return [
         `工单需求：${task}`,
         `处理结果：已完成只读查询，${ticketIds.length ? `返回工单 ${ticketIds.join("、")}。` : "已返回匹配工单。"}`,
@@ -223,7 +225,7 @@ function buildMockText(input: GenerateTextInput) {
       ].join("\n");
     }
 
-    if (/未创建退款|未执行退款|未更新工单状态|未执行写入/.test(input.user)) {
+    if (/未创建退款|未执行退款|未更新工单状态|未执行写入|不执行写入|无需退款|无需退款或状态变更/.test(input.user)) {
       return [
         `工单需求：${task}`,
         "处理结果：已完成核查，未创建退款记录，也未更新工单状态。",
@@ -380,25 +382,31 @@ function isRefundTask(task: string) {
 
 function createPolicyKeyword(task: string, messages: LlmChatMessage[]) {
   const lastPolicyError = getLastToolError(messages, "searchPolicy");
+  // 只使用用户任务和工具观察作为业务证据；system prompt 中的示例词不能参与场景分类。
+  const businessEvidence = messages
+    .filter((message) => message.role === "user" || message.role === "tool")
+    .map((message) => message.content ?? "")
+    .join("\n");
+  const evidence = `${task}\n${businessEvidence}`;
 
-  if (lastPolicyError && /升级|合同/.test(task)) {
+  if (lastPolicyError && /升级/.test(evidence)) {
     return "upgrade";
   }
 
-  if (/发票/.test(task)) {
+  if (/发票/.test(evidence)) {
     // 模拟真实模型更常见的自然语言关键词，验证后端政策检索能完成语义归一化。
     return "发票补开";
   }
 
-  if (/升级|合同/.test(task)) {
+  if (/升级/.test(evidence)) {
     return "升级";
   }
 
-  if (/SLA|服务不可用|不可用/i.test(task)) {
+  if (/SLA|服务不可用|不可用/i.test(evidence)) {
     return "sla";
   }
 
-  if (/取消|cancel/i.test(task)) {
+  if (/取消|cancel/i.test(evidence)) {
     return "cancel";
   }
 

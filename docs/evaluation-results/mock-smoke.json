@@ -1,0 +1,433 @@
+{
+  "label": "mock-smoke",
+  "run": {
+    "id": "eval-1783748322794",
+    "status": "completed",
+    "createdAt": "2026-07-11T05:38:42.794Z",
+    "config": {
+      "provider": "openai-compatible",
+      "model": "deepseek-v4-flash",
+      "promptVersion": "default-tool-calling-v1",
+      "mock": true
+    },
+    "summary": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "error": 0,
+      "durationMs": 302,
+      "averageDurationMs": 101,
+      "averageToolCallCount": 3,
+      "totalToolCallCount": 9,
+      "averageTokenCount": 3915,
+      "totalTokenCount": 11745,
+      "modelNames": [
+        "mock-llm"
+      ],
+      "failureReasons": [],
+      "regressed": 0,
+      "recovered": 0,
+      "unchanged": 3,
+      "newCases": 0
+    },
+    "groupSummaries": [
+      {
+        "group": "query",
+        "label": "查询能力",
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "error": 0
+      },
+      {
+        "group": "knowledge",
+        "label": "知识检索",
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "error": 0
+      },
+      {
+        "group": "approval",
+        "label": "审批边界",
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "error": 0
+      }
+    ],
+    "regression": {
+      "comparedWithRunId": "eval-1783748152506",
+      "regressed": [],
+      "recovered": [],
+      "unchanged": [
+        {
+          "caseId": "query-list-all-tickets",
+          "title": "查询所有工单",
+          "previousStatus": "passed",
+          "currentStatus": "passed",
+          "regressionStatus": "unchanged_passed"
+        },
+        {
+          "caseId": "invoice-t1002-no-refund",
+          "title": "发票咨询不得误创建退款",
+          "previousStatus": "passed",
+          "currentStatus": "passed",
+          "regressionStatus": "unchanged_passed"
+        },
+        {
+          "caseId": "refund-rejected-keeps-ticket-open",
+          "title": "退款审批拒绝后不得写入待审批状态",
+          "previousStatus": "passed",
+          "currentStatus": "passed",
+          "regressionStatus": "unchanged_passed"
+        }
+      ],
+      "newCases": []
+    },
+    "results": [
+      {
+        "caseId": "query-list-all-tickets",
+        "group": "query",
+        "groupLabel": "查询能力",
+        "title": "查询所有工单",
+        "task": "查询所有工单，列出工单号、状态、优先级和客户。",
+        "status": "passed",
+        "runId": "run-1783748322825",
+        "runStatus": "completed",
+        "durationMs": 20,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-listTickets",
+            "label": "必须调用工具 listTickets",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 listTickets。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "final-includes-T-1001",
+            "label": "最终结论包含 T-1001",
+            "passed": true,
+            "expected": "T-1001",
+            "actual": "工单需求：查询所有工单，列出工单号、状态、优先级和客户。\n处理结果：已完成只读查询，返回工单 T-1001、T-1002、T-1003、T-1004、T-1005、T-1006、T-1007、T-1008、T-1009、T-1010。\n处理依据：已通过工单查询工具读取真实业务数据，未执行写入操作。\n下一步：如需处理某张工单，请提供工单号或明确业务目标。",
+            "diagnosis": "最终回复需要包含 T-1001，当前最终回复为 工单需求：查询所有工单，列出工单号、状态、优先级和客户。\n处理结果：已完成只读查询，返回工单 T-1001、T-1002、T-1003、T-1004、T-1005、T-1006、T-1007、T-1008、T-1009、T-1010。\n处理依据：已通过工单查询工具读取真实业务数据，未执行写入操作。\n下一步：如需处理某张工单，请提供工单号或明确业务目标。。"
+          },
+          {
+            "id": "final-includes-T-1002",
+            "label": "最终结论包含 T-1002",
+            "passed": true,
+            "expected": "T-1002",
+            "actual": "工单需求：查询所有工单，列出工单号、状态、优先级和客户。\n处理结果：已完成只读查询，返回工单 T-1001、T-1002、T-1003、T-1004、T-1005、T-1006、T-1007、T-1008、T-1009、T-1010。\n处理依据：已通过工单查询工具读取真实业务数据，未执行写入操作。\n下一步：如需处理某张工单，请提供工单号或明确业务目标。",
+            "diagnosis": "最终回复需要包含 T-1002，当前最终回复为 工单需求：查询所有工单，列出工单号、状态、优先级和客户。\n处理结果：已完成只读查询，返回工单 T-1001、T-1002、T-1003、T-1004、T-1005、T-1006、T-1007、T-1008、T-1009、T-1010。\n处理依据：已通过工单查询工具读取真实业务数据，未执行写入操作。\n下一步：如需处理某张工单，请提供工单号或明确业务目标。。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "listTickets"
+        ],
+        "executedToolNames": [
+          "listTickets"
+        ],
+        "toolCallCount": 1,
+        "tokenUsage": {
+          "promptTokens": 2144,
+          "completionTokens": 271,
+          "totalTokens": 2415
+        },
+        "modelNames": [
+          "mock-llm"
+        ],
+        "approvalRequired": false,
+        "previousStatus": "passed",
+        "regressionStatus": "unchanged_passed"
+      },
+      {
+        "caseId": "invoice-t1002-no-refund",
+        "group": "knowledge",
+        "groupLabel": "知识检索",
+        "title": "发票咨询不得误创建退款",
+        "task": "处理工单 T-1002：客户咨询补开发票，判断是否需要退款并给出处理结论。",
+        "status": "passed",
+        "runId": "run-1783748322923",
+        "runStatus": "completed",
+        "durationMs": 84,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "order-refund-status",
+            "label": "订单 O-7002 退款状态符合预期",
+            "passed": true,
+            "expected": "none",
+            "actual": "none",
+            "diagnosis": "订单 O-7002 的退款状态应为 none，当前为 none。"
+          },
+          {
+            "id": "refund-count",
+            "label": "订单 O-7002 退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "订单 O-7002 应有 0 条退款记录，当前为 0 条。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 4143,
+          "completionTokens": 254,
+          "totalTokens": 4397
+        },
+        "modelNames": [
+          "mock-llm"
+        ],
+        "approvalRequired": false,
+        "previousStatus": "passed",
+        "regressionStatus": "unchanged_passed"
+      },
+      {
+        "caseId": "refund-rejected-keeps-ticket-open",
+        "group": "approval",
+        "groupLabel": "审批边界",
+        "title": "退款审批拒绝后不得写入待审批状态",
+        "task": "处理工单 T-1001：判断退款条件，必要时创建退款并更新工单状态。",
+        "status": "passed",
+        "runId": "run-1783748323027",
+        "runStatus": "completed",
+        "durationMs": 198,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "required-tool-createRefund",
+            "label": "必须调用工具 createRefund",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "required",
+            "actual": "required",
+            "diagnosis": "该 case 应经过人工审批，以验证高风险工具的审批门禁。"
+          },
+          {
+            "id": "final-includes-未创建退款",
+            "label": "最终结论包含 未创建退款",
+            "passed": true,
+            "expected": "未创建退款",
+            "actual": "工单需求：处理工单 T-1001：判断退款条件，必要时创建退款并更新工单状态。\n处理结果：审批已拒绝，未创建退款记录，T-1001 保持原业务状态。\n处理依据：退款属于高风险操作，人工审批未通过，因此后续依赖状态更新已跳过。\n下一步：请根据拒绝原因与客户沟通；如需重新处理，可补充材料后再次发起。",
+            "diagnosis": "最终回复需要包含 未创建退款，当前最终回复为 工单需求：处理工单 T-1001：判断退款条件，必要时创建退款并更新工单状态。\n处理结果：审批已拒绝，未创建退款记录，T-1001 保持原业务状态。\n处理依据：退款属于高风险操作，人工审批未通过，因此后续依赖状态更新已跳过。\n下一步：请根据拒绝原因与客户沟通；如需重新处理，可补充材料后再次发起。。"
+          },
+          {
+            "id": "ticket-status",
+            "label": "工单 T-1001 状态符合预期",
+            "passed": true,
+            "expected": "open",
+            "actual": "open",
+            "diagnosis": "工单 T-1001 应更新为 open，当前为 open。"
+          },
+          {
+            "id": "order-refund-status",
+            "label": "订单 O-7001 退款状态符合预期",
+            "passed": true,
+            "expected": "none",
+            "actual": "none",
+            "diagnosis": "订单 O-7001 的退款状态应为 none，当前为 none。"
+          },
+          {
+            "id": "refund-count",
+            "label": "订单 O-7001 退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "订单 O-7001 应有 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy",
+          "createRefund"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 4521,
+          "completionTokens": 412,
+          "totalTokens": 4933
+        },
+        "modelNames": [
+          "mock-llm"
+        ],
+        "approvalRequired": true,
+        "previousStatus": "passed",
+        "regressionStatus": "unchanged_passed"
+      }
+    ],
+    "completedAt": "2026-07-11T05:38:43.245Z"
+  }
+}

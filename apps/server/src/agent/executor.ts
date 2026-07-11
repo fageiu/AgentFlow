@@ -464,11 +464,24 @@ async function buildActionPlanStep(run: AgentRun, ticketContext: unknown, index:
         task: run.task,
         ticketContext,
         evidence: summarizeStepsForFinalPrompt(run.steps),
+        // 沙箱使用固定业务时钟，避免演示数据随真实日期推移后改变退款资格判断。
+        businessDate: process.env.AGENTFLOW_BUSINESS_DATE ?? "2026-07-01",
       }),
       temperature: 0.1,
     }),
   );
-  const actionPlan = parseAgentPlan(actionPlanResult.value.text, true);
+  let actionPlan = parseAgentPlan(actionPlanResult.value.text, true);
+  const refundEvidence = `${run.task}\n${JSON.stringify(ticketContext)}`;
+  const hasExplicitRefundRequest = /申请退款|退款诉求|创建(?:必要的)?退款|创建退款记录|退款申请/.test(refundEvidence);
+
+  if (actionPlan.steps.some((step) => step.allowedTools[0] === "createRefund") && !hasExplicitRefundRequest) {
+    // 只有明确退款诉求才能解锁写入；“判断是否需要退款”或其他咨询不能被模型擅自升级。
+    actionPlan = {
+      version: 1,
+      summary: "现有任务与工单没有明确退款诉求，服务端安全边界阻止退款写入。",
+      steps: [],
+    };
+  }
   const actionTools = actionPlan.steps.map((step) => step.allowedTools[0]);
 
   if (actionTools.some((toolName) => toolName !== "createRefund" && toolName !== "updateTicketStatus")) {
@@ -541,6 +554,23 @@ const defaultPlanStepDefinitions = {
  * 默认只补齐核查步骤；用户明确提出的业务动作由 Planner 保留，避免把请求压缩成固定脚本。
  */
 function completeInitialPlanCoverage(plan: AgentPlan, task: string, hasTicketContext: boolean): AgentPlan {
+  if (!extractProcessTicketId(task) && /查询|列出|查看|筛选|统计|工单列表|哪些工单/.test(task)) {
+    const requiresFilter = /高优先级|中优先级|低优先级|高优|中优|低优|客户\s*C-\d+|待审批|等待审批|已关闭|已拒绝|状态为/i.test(task);
+    const toolName = requiresFilter ? "searchTickets" : "listTickets";
+
+    return {
+      version: 1,
+      summary: plan.summary || "按用户条件查询工单并返回真实结果。",
+      steps: [{
+        id: requiresFilter ? "search-tickets" : "list-tickets",
+        title: requiresFilter ? "按条件筛选工单" : "查询全部工单",
+        objective: requiresFilter ? "使用用户给定条件筛选工单，不产生业务写入。" : "读取全部工单，不产生业务写入。",
+        allowedTools: [toolName],
+        requiresApproval: false,
+      }],
+    };
+  }
+
   if (!extractProcessTicketId(task)) {
     return plan;
   }
@@ -673,23 +703,42 @@ function parseAgentPlan(raw: string, allowEmpty = false): AgentPlan {
     }
     stepIds.add(step.id);
 
+    const toolName = step.allowedTools[0];
     return {
       id: step.id,
       title: step.title,
       objective: step.objective,
-      allowedTools: [step.allowedTools[0]],
-      requiresApproval: Boolean(step.requiresApproval),
+      allowedTools: [toolName],
+      // 审批属性由服务端工具风险等级决定，不能信任模型返回的布尔值。
+      requiresApproval: toolRegistry[toolName].riskLevel === "high",
     } satisfies AgentPlanStep;
   });
 
-  for (const step of steps) {
-    const tool = toolRegistry[step.allowedTools[0]];
-    if (step.requiresApproval !== (tool.riskLevel === "high")) {
-      throw new Error(`Planner approval flag is inconsistent for ${step.allowedTools[0]}.`);
-    }
+  return { version: 1, summary: candidate.summary, steps };
+}
+
+/** 对语义明确的规则查询做参数归一，避免模型用冗长或错误关键词制造无意义重试。 */
+function normalizeTaskAwareToolCall(task: string, toolCall: LlmToolCall): LlmToolCall {
+  if (toolCall.name !== "searchPolicy") {
+    return toolCall;
   }
 
-  return { version: 1, summary: candidate.summary, steps };
+  let keyword: string | undefined;
+  if (/发票|开票/.test(task)) {
+    keyword = "发票";
+  } else if (/升级/.test(task)) {
+    keyword = "upgrade";
+  } else if (/SLA|服务不可用|不可用/i.test(task)) {
+    keyword = "sla";
+  } else if (/取消|cancel/i.test(task)) {
+    keyword = "cancel";
+  } else if (/退款|refund/i.test(task)) {
+    keyword = "refund";
+  }
+
+  return keyword
+    ? { ...toolCall, arguments: { ...toolCall.arguments, keyword } }
+    : toolCall;
 }
 
 /** 将当前计划位置写入模型上下文，同时让 trace 能据此审计每一步实际授权范围。 */
@@ -945,6 +994,17 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
       }
     }
 
+    if (!activePlanStep && actionDecisionCompleted && !pendingRecovery) {
+      // 计划已耗尽时由 Executor 主动收敛，避免模型在无授权步骤时重复调用最后一个工具。
+      const finalStep = await buildFinalConclusionStep(
+        run,
+        stepIndex++,
+        "已完成计划中的全部步骤，请根据真实工具结果生成最终结论。",
+      );
+      yield addStep(run, finalStep);
+      return;
+    }
+
     messages.push(buildPlanProgressMessage(activePlanStep));
     const assistant = await measureStep(() =>
       generateChat({
@@ -968,7 +1028,8 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
       }
       let shouldAskModelToRecover = false;
 
-      for (const toolCall of toolCalls) {
+      for (const rawToolCall of toolCalls) {
+        const toolCall = normalizeTaskAwareToolCall(run.task, rawToolCall);
         throwIfRunCancelled(run);
         try {
           if (!isAgentToolName(toolCall.name)) {
@@ -1043,6 +1104,8 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
 
           if (retryDecision.retryable) {
             retryAttemptsByTool.set(toolCall.name, nextRetryAttempt);
+            // OpenAI-compatible 协议要求 assistant.tool_calls 后立即存在同 ID 的 tool message。
+            messages.push(buildToolErrorMessage(toolCall, traceError, nextRetryAttempt));
             const completedPlanSteps = activePlan.steps.slice(0, activePlanStepIndex);
             const replanned = await buildReplanStep(
               run.task,
@@ -1077,7 +1140,6 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
               retryAttempt: nextRetryAttempt,
               decision: retryDecision,
             });
-            messages.push(buildToolErrorMessage(toolCall, traceError, nextRetryAttempt));
             yield addStep(run, retryStep);
             shouldAskModelToRecover = true;
             break;

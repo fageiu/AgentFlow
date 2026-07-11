@@ -120,6 +120,13 @@ export function updateTicketStatus(ticketId: string, status: TicketStatus) {
   }
 
   const order = getOrder(ticket.orderId);
+
+  if (order.refundStatus === "pending_approval" && status !== "waiting_approval") {
+    throw new Error(
+      `Cannot update ticket ${ticketId} to ${status}: order ${order.id} has a pending refund approval, so the ticket must remain waiting_approval.`,
+    );
+  }
+
   const requiredRefundStatus: Partial<Record<TicketStatus, RefundStatus>> = {
     waiting_approval: "pending_approval",
     refunded: "created",

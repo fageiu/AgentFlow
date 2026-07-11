@@ -35,6 +35,7 @@ export function buildActionPlanPrompt(input: {
   task: string;
   ticketContext?: unknown;
   evidence: unknown;
+  businessDate: string;
 }) {
   return {
     system: [
@@ -43,10 +44,13 @@ export function buildActionPlanPrompt(input: {
       "JSON 格式：{\"version\":1,\"summary\":\"...\",\"steps\":[{\"id\":\"...\",\"title\":\"...\",\"objective\":\"...\",\"allowedTools\":[\"...\"],\"requiresApproval\":true}]}。",
       "你只能规划 createRefund 和 updateTicketStatus，或者返回空 steps。",
       "必须根据真实客户、订单和规则证据判断：仅当规则与实际情况支持退款时，才依次规划 createRefund（requiresApproval=true）和 updateTicketStatus；否则返回空 steps。",
+      "如果证据表明订单 refundStatus 已是 pending_approval 且工单已是 waiting_approval，说明目标状态已经达成，必须返回空 steps，不能重复审批或关闭工单。",
+      "涉及天数、有效期或退款窗口时，必须使用提供的业务基准日期计算，不得以“当前日期未知”为由跳过判断。",
       "不要因为用户提到退款就默认执行；也不要编造未在证据中出现的资格或金额。",
     ].join("\n"),
     user: [
       `用户任务：${input.task}`,
+      `业务基准日期：${input.businessDate}`,
       input.ticketContext ? `工单上下文：${JSON.stringify(input.ticketContext)}` : "",
       `已完成核查证据：${JSON.stringify(input.evidence)}`,
     ].filter(Boolean).join("\n\n"),
@@ -105,6 +109,7 @@ export function buildFinalConclusionPrompt(input: {
       "4. 处理结果必须明确写出已完成、未完成或审批拒绝，以及实际写入或未写入的业务状态。",
       "5. 处理依据只能引用已读取的工单、客户、订单、规则和审批结果，不得编造。",
       "6. 如果只是查询或核查，明确说明未执行写入操作；如果审批被拒，明确说明未创建退款及工单保持的状态。",
+      "7. 如果用户要求列出、查询或筛选数据，处理结果必须保留工具结果中的标识符和用户点名的字段；不能只返回数量或笼统摘要。",
     ].join("\n"),
     user: [
       `用户任务：${input.task}`,
