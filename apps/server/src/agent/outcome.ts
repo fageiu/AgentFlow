@@ -19,6 +19,21 @@ function collectEvidenceReferences(steps: AgentStep[]) {
   )];
 }
 
+function getToolOperation(step: AgentStep) {
+  try {
+    const detail = JSON.parse(step.detail) as { output?: { operation?: unknown } };
+    return typeof detail.output?.operation === "string" ? detail.output.operation : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function didWriteToolMutate(step: AgentStep) {
+  const operation = getToolOperation(step);
+  // 旧 Trace 没有 operation 元数据时沿用“成功调用即已执行”的兼容语义。
+  return operation !== "reused" && operation !== "unchanged";
+}
+
 function getDefaultUserMessage(run: AgentRun) {
   if (run.status === "waiting_approval") {
     return "任务正在等待人工审批。";
@@ -40,9 +55,14 @@ export function deriveAgentOutcome(run: AgentRun): AgentOutcome {
   const executedToolSteps = run.steps.filter(isExecutedToolStep);
   const performedActions = [...new Set(
     executedToolSteps
+      .filter(didWriteToolMutate)
       .map((step) => step.toolName)
       .filter((toolName): toolName is string => typeof toolName === "string" && writeTools.has(toolName)),
   )];
+  const hasIdempotentReuse = executedToolSteps.some((step) => {
+    const operation = getToolOperation(step);
+    return operation === "reused" || operation === "unchanged";
+  });
   const approvalRejected = run.steps.some((step) => step.approvalRequest?.status === "rejected");
   const hasPendingRefundEvidence = executedToolSteps.some(
     (step) => step.detail.includes('"refundStatus": "pending_approval"')
@@ -61,7 +81,7 @@ export function deriveAgentOutcome(run: AgentRun): AgentOutcome {
     decision = "manual_review";
   } else if (performedActions.includes("createRefund")) {
     decision = "refund_required";
-  } else if (refundIntentPattern.test(run.task) && hasPendingRefundEvidence) {
+  } else if (refundIntentPattern.test(run.task) && (hasIdempotentReuse || hasPendingRefundEvidence)) {
     decision = "already_satisfied";
   } else if (refundIntentPattern.test(run.task)) {
     decision = "no_refund";

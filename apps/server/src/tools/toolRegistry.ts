@@ -221,7 +221,12 @@ export const toolRegistry = {
     jsonSchema: jsonSchemas.updateTicketStatus,
     execute(input) {
       const parsed = updateTicketStatusInputSchema.parse(input);
-      return updateTicketStatus(parsed.ticketId, parsed.status);
+      const previousStatus = getTicket(parsed.ticketId).status;
+      const ticket = updateTicketStatus(parsed.ticketId, parsed.status);
+      return {
+        ...ticket,
+        operation: previousStatus === parsed.status ? "unchanged" : "updated",
+      };
     },
   },
   createRefund: {
@@ -232,7 +237,14 @@ export const toolRegistry = {
     jsonSchema: jsonSchemas.createRefund,
     execute(input) {
       const parsed = createRefundInputSchema.parse(input);
-      return createRefund(parsed.orderId, parsed.amount, parsed.reason);
+      const existingRefund = getSandboxState().refunds.find(
+        (refund) => refund.orderId === parsed.orderId && refund.status === "pending_approval",
+      );
+      const refund = createRefund(parsed.orderId, parsed.amount, parsed.reason);
+      return {
+        ...refund,
+        operation: existingRefund ? "reused" : "created",
+      };
     },
   },
   getSandboxState: {

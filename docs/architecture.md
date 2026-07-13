@@ -72,7 +72,7 @@ sequenceDiagram
 
 ## 结构化 Outcome
 
-模型生成的自然语言只写入 `outcome.userMessage`。服务端依据可信 Run 终态、审批决议和实际执行的写工具派生 `decision` 与 `performedActions`，并从工具 Trace 提取业务证据引用。确定性 Judge 优先断言结构化 Outcome、工具轨迹和沙箱副作用，不再把“未创建退款”等固定措辞当作业务正确性的唯一证据。
+模型生成的自然语言只写入 `outcome.userMessage`。服务端依据可信 Run 终态、审批决议和实际执行的写工具派生 `decision` 与 `performedActions`，并从工具 Trace 提取业务证据引用。写工具通过 `operation` 标记 `created/reused` 或 `updated/unchanged`，因此幂等复用不会被误记为新的业务写入。确定性 Judge 优先断言结构化 Outcome、工具轨迹和沙箱副作用，不再把“未创建退款”等固定措辞当作业务正确性的唯一证据。
 
 旧版持久化 Run 可以没有 Outcome；新 Run 在进入 `waiting_approval`、`completed`、`failed` 或 `cancelled` 状态时写入结构化结果，服务重启后被中断的 Run 也会补写 `failed` Outcome。
 

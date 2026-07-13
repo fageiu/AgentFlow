@@ -53,6 +53,7 @@
 - 只有 `listAgentTools()` 返回的工具会交给 LLM 自主调用；演示控制类工具例如 `resetSandboxState` 不应暴露给模型。
 - 查询类工具例如 `listTickets`、`searchTickets` 应保持 `riskLevel: "read"`，用于只读业务问答，不应产生退款、审批或状态变更。
 - 退款创建与工单状态同步属于同一业务写入单元；后续写入失败或 run 取消时必须调用定向补偿，避免留下部分成功状态。
+- 写工具需要在 Tool Result 中返回 `operation` 元数据，例如 `created/reused`、`updated/unchanged`；结构化 Outcome 据此区分真实副作用与幂等复用，不能把工具调用次数直接当成写入次数。
 
 ## Human Approval 约定
 

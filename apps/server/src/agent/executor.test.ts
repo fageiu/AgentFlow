@@ -168,6 +168,36 @@ test("任务未明说发票时仍应依据工单上下文禁止误退款", async
   }
 });
 
+test("重复退款应通过工具 operation 元数据派生 already_satisfied Outcome", async () => {
+  const testDataDir = join(process.cwd(), ".agentflow-test-data");
+
+  process.env.LLM_MOCK = "true";
+  process.env.AGENTFLOW_DATA_DIR = testDataDir;
+  rmSync(testDataDir, { force: true, recursive: true });
+
+  const { runAgentTask } = await import("./executor.js");
+  const { clearRuns } = await import("../trace/runStore.js");
+  const { getSandboxState, resetSandboxState } = await import("../tools/sandboxTools.js");
+  const task = "处理工单 T-1001：判断客户是否符合退款规则，必要时创建退款并更新工单状态。";
+
+  resetSandboxState();
+
+  try {
+    const firstRun = await runAgentTask(task);
+    const secondRun = await runAgentTask(task);
+
+    assert.equal(firstRun.outcome?.decision, "refund_required");
+    assert.deepEqual(firstRun.outcome?.performedActions, ["createRefund", "updateTicketStatus"]);
+    assert.equal(secondRun.outcome?.decision, "already_satisfied");
+    assert.deepEqual(secondRun.outcome?.performedActions, [], "幂等复用不得声称产生新的业务写入");
+    assert.equal(getSandboxState().refunds.length, 1);
+  } finally {
+    resetSandboxState();
+    clearRuns();
+    rmSync(testDataDir, { force: true, recursive: true });
+  }
+});
+
 test("退款待审批期间禁止把工单关闭", async () => {
   const { createRefund, getSandboxState, resetSandboxState, updateTicketStatus } = await import("../tools/sandboxTools.js");
 

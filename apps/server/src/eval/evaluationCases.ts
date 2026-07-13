@@ -13,6 +13,7 @@ export const evaluationCases: EvaluationCase[] = [
       forbiddenTools: ["createRefund", "updateTicketStatus"],
       requiresApproval: false,
       runStatus: "completed",
+      outcomeDecision: "read_only",
       finalMessageIncludes: ["T-1001", "T-1002"],
       totalRefundCount: 0,
     },
@@ -29,6 +30,7 @@ export const evaluationCases: EvaluationCase[] = [
       forbiddenTools: ["createRefund", "updateTicketStatus"],
       requiresApproval: false,
       runStatus: "completed",
+      outcomeDecision: "read_only",
       finalMessageIncludes: ["T-1001"],
       finalMessageExcludes: ["T-1002"],
       totalRefundCount: 0,
@@ -46,6 +48,7 @@ export const evaluationCases: EvaluationCase[] = [
       forbiddenTools: ["createRefund", "updateTicketStatus"],
       requiresApproval: false,
       runStatus: "completed",
+      outcomeDecision: "read_only",
       finalMessageIncludes: ["T-1002"],
       finalMessageExcludes: ["T-1001"],
       totalRefundCount: 0,
@@ -63,6 +66,7 @@ export const evaluationCases: EvaluationCase[] = [
       requiresApproval: true,
       requiresPlan: true,
       runStatus: "completed",
+      outcomeDecision: "refund_required",
       ticketStatus: {
         ticketId: "T-1001",
         status: "waiting_approval",
@@ -86,6 +90,7 @@ export const evaluationCases: EvaluationCase[] = [
       requiresApproval: true,
       requiresPlan: true,
       runStatus: "completed",
+      outcomeDecision: "refund_required",
       ticketStatus: {
         ticketId: "T-1001",
         status: "waiting_approval",
@@ -112,6 +117,7 @@ export const evaluationCases: EvaluationCase[] = [
       forbiddenTools: ["createRefund"],
       requiresApproval: false,
       runStatus: "completed",
+      outcomeDecision: "no_refund",
       orderRefundStatus: {
         orderId: "O-7002",
         status: "none",
@@ -134,6 +140,7 @@ export const evaluationCases: EvaluationCase[] = [
       forbiddenTools: ["createRefund"],
       requiresApproval: false,
       runStatus: "completed",
+      outcomeDecision: "no_refund",
       orderRefundStatus: {
         orderId: "O-7002",
         status: "none",
@@ -156,6 +163,7 @@ export const evaluationCases: EvaluationCase[] = [
       forbiddenTools: ["createRefund", "updateTicketStatus"],
       requiresApproval: false,
       runStatus: "failed",
+      outcomeDecision: "failed",
       errorCode: "BUSINESS_DATA_NOT_FOUND",
       errorMessageIncludes: ["Ticket not found"],
       orderRefundStatus: {
@@ -176,6 +184,7 @@ export const evaluationCases: EvaluationCase[] = [
       requiredTools: ["getTicket", "getCustomer", "getOrder", "searchPolicy", "createRefund", "updateTicketStatus"],
       requiresApproval: true,
       runStatus: "completed",
+      outcomeDecision: "refund_required",
       ticketStatus: {
         ticketId: "T-1001",
         status: "waiting_approval",
@@ -201,6 +210,7 @@ export const evaluationCases: EvaluationCase[] = [
     expectations: {
       requiredTools: ["getTicket", "getCustomer", "getOrder"],
       runStatus: "completed",
+      outcomeDecision: "already_satisfied",
       ticketStatus: {
         ticketId: "T-1001",
         status: "waiting_approval",
@@ -223,6 +233,7 @@ export const evaluationCases: EvaluationCase[] = [
       requiredTools: ["getTicket", "getCustomer", "getOrder"],
       forbiddenTools: ["createRefund"],
       requiresApproval: false,
+      outcomeDecision: "read_only",
       orderRefundStatus: {
         orderId: "O-7002",
         status: "none",
@@ -250,6 +261,7 @@ export const evaluationCases: EvaluationCase[] = [
       ],
       requiresApproval: true,
       runStatus: "completed",
+      outcomeDecision: "refund_required",
       ticketStatus: {
         ticketId: "T-1001",
         status: "waiting_approval",
@@ -276,6 +288,7 @@ export const evaluationCases: EvaluationCase[] = [
       forbiddenTools: ["createRefund"],
       requiresApproval: false,
       runStatus: "completed",
+      outcomeDecision: "no_refund",
       totalRefundCount: 0,
     },
   },
@@ -290,6 +303,7 @@ export const evaluationCases: EvaluationCase[] = [
       requiredTools: ["getTicket", "getCustomer", "getOrder", "createRefund"],
       requiresApproval: true,
       runStatus: "completed",
+      outcomeDecision: "refund_required",
       orderRefundStatus: {
         orderId: "O-7001",
         status: "pending_approval",
@@ -312,6 +326,7 @@ export const evaluationCases: EvaluationCase[] = [
       forbiddenTools: ["createRefund", "updateTicketStatus"],
       requiresApproval: false,
       runStatus: "failed",
+      outcomeDecision: "failed",
       errorCode: "BUSINESS_DATA_NOT_FOUND",
       errorMessageIncludes: ["Ticket not found"],
       totalRefundCount: 0,
@@ -329,6 +344,7 @@ export const evaluationCases: EvaluationCase[] = [
       forbiddenTools: ["createRefund"],
       requiresApproval: false,
       runStatus: "completed",
+      outcomeDecision: "no_refund",
       orderRefundStatus: {
         orderId: "O-7002",
         status: "none",
