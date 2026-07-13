@@ -7,8 +7,10 @@
     "dev": "pnpm --parallel dev",
     "dev:web": "pnpm --filter @agentflow/web dev",
     "dev:server": "pnpm --filter @agentflow/server dev",
+    "test": "pnpm --recursive --if-present test",
     "build": "pnpm --recursive build",
-    "typecheck": "pnpm --recursive typecheck"
+    "typecheck": "pnpm --recursive typecheck",
+    "eval:gate": "pnpm --filter @agentflow/server eval -- --label ci-mock-gate --mock --output .agentflow-artifacts/mock-evaluation.md"
   },
   "packageManager": "pnpm@9.15.0",
   "engines": {

@@ -124,3 +124,10 @@
 - Tool failures now create failed trace steps instead of disappearing into route-level exceptions.
 - Failed runs persist structured `error` metadata and stream SSE `error` events with the latest run snapshot.
 - Evaluation safety cases assert `BUSINESS_DATA_NOT_FOUND`, covering missing-ticket paths without triggering approval or write tools.
+
+## Week 15
+
+- GitHub Actions quality gate runs server tests, workspace type checks, production builds, and the complete Mock Golden Task suite.
+- Evaluation failures and execution errors return a non-zero exit code, preventing regressed changes from passing the gate.
+- CI publishes the generated Markdown summary and retains Markdown/JSON evaluation reports as downloadable artifacts.
+- Real-model evaluation remains a separately authorized release check so pull requests do not incur API costs.

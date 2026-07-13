@@ -8,3 +8,4 @@ coverage/
 .pnpm-store/
 .logs/
 .agentflow-data/
+.agentflow-artifacts/

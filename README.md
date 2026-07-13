@@ -151,6 +151,21 @@ pnpm --filter @agentflow/server eval:compare -- \
 
 `AGENTFLOW_PROMPT_VERSION` 当前用于记录实验元数据；只有 Prompt 内容真实发生变化时，才能把两次运行描述为 Prompt A/B，而不能只修改版本标签。
 
+### CI 质量门禁
+
+仓库通过 GitHub Actions 在 Pull Request、`main` 分支推送和手动触发时执行统一质量门禁：
+
+```bash
+pnpm test
+pnpm typecheck
+pnpm build
+pnpm eval:gate
+```
+
+`eval:gate` 会运行完整 Mock Golden Task，并把 Markdown/JSON 报告写入 `.agentflow-artifacts/`。只要任一 case 失败或执行异常，命令就以非零状态退出并阻断流水线；报告同时写入 GitHub Actions Summary，并作为构建产物保留 14 天。
+
+CI 不读取真实模型密钥，也不会产生模型 API 费用。真实模型冒烟和全量回归仍需在获得明确费用授权后单独执行，避免把 Mock 成绩与真实模型成绩混淆。
+
 ### 已验证的真实模型冒烟结果
 
 使用 `deepseek-v4-flash`、关闭 Mock fallback，在查询、非退款咨询和审批拒绝3条代表性 Case 上完成两轮真实模型评测：

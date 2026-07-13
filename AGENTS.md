@@ -88,3 +88,5 @@
 - provider 如果拿不到真实 usage，应为 Mock/fallback 提供估算 token，保证本地 Demo 的评测看板不缺指标。
 - 每次评测 run 需要保存 provider、model、promptVersion 和 mock/real 模式，便于对比不同模型或 Prompt 配置效果。
 - 真实 Provider 评测中只要触发 Mock fallback，该 case 不得判定为通过。
+- CI 质量门禁统一执行测试、类型检查、构建和完整 Mock Golden Task；任一评测失败或异常都必须使流水线失败。
+- CI 生成的评测 Markdown/JSON 保存到 `.agentflow-artifacts/` 并作为流水线产物上传，不提交到 Git。
