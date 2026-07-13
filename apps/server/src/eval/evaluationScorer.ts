@@ -214,6 +214,23 @@ export function scoreEvaluationCase(input: {
     );
   }
 
+  if (expectations.finalMessageIncludesAny?.length) {
+    const matchedText = expectations.finalMessageIncludesAny.find((text) => finalMessage.includes(text));
+    const expectedTexts = expectations.finalMessageIncludesAny.join(" / ");
+    assertions.push(
+      createAssertion(
+        `final-includes-any-${expectations.finalMessageIncludesAny.join("-")}`,
+        "最终结论包含任一等价表述",
+        Boolean(matchedText),
+        expectedTexts,
+        matchedText ?? (finalMessage || "missing-final-message"),
+        matchedText
+          ? `最终回复已命中等价表述“${matchedText}”。`
+          : `最终回复需要包含以下任一表述：${expectedTexts}；当前最终回复为 ${finalMessage || "missing-final-message"}。`,
+      ),
+    );
+  }
+
   for (const forbiddenText of expectations.finalMessageExcludes ?? []) {
     assertions.push(
       createAssertion(

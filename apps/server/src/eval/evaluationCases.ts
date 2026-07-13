@@ -354,7 +354,7 @@ export const evaluationCases: EvaluationCase[] = [
       ],
       requiresApproval: false,
       runStatus: "completed",
-      finalMessageIncludes: ["未创建退款"],
+      finalMessageIncludesAny: ["未创建退款", "未执行任何退款", "未产生退款"],
       totalRefundCount: 0,
     },
   },

@@ -262,6 +262,8 @@ export interface EvaluationExpectations {
   errorMessageIncludes?: string[];
   errorCode?: string;
   finalMessageIncludes?: string[];
+  /** 最终回复至少命中其中一个等价短语，避免确定性 Judge 因同义表达产生假阴性。 */
+  finalMessageIncludesAny?: string[];
   finalMessageExcludes?: string[];
   ticketStatus?: {
     ticketId: string;

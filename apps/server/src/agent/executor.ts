@@ -474,6 +474,36 @@ async function buildPlanStep(run: AgentRun, index: number, ticketContext?: unkno
   };
 }
 
+/**
+ * 将 Action Planner 输出收敛到退款写入事务：非明确退款任务禁止任何写入，
+ * 明确退款任务则必须保持 createRefund -> updateTicketStatus 的完整顺序。
+ */
+export function constrainActionPlan(actionPlan: AgentPlan, task: string, ticketContext: unknown) {
+  const refundEvidence = `${task}\n${JSON.stringify(ticketContext)}`;
+  const hasExplicitRefundRequest = /申请退款|退款诉求|创建(?:必要的)?退款|创建退款记录|退款申请/.test(refundEvidence);
+
+  if (!hasExplicitRefundRequest && actionPlan.steps.length > 0) {
+    // 咨询类任务即使模型误规划单独状态写入，也应安全收敛为空计划而不是让整个 run 失败。
+    return {
+      version: 1,
+      summary: "现有任务与工单没有明确退款诉求，服务端安全边界阻止业务写入。",
+      steps: [],
+    } satisfies AgentPlan;
+  }
+
+  const actionTools = actionPlan.steps.map((step) => step.allowedTools[0]);
+
+  if (actionTools.some((toolName) => toolName !== "createRefund" && toolName !== "updateTicketStatus")) {
+    throw new Error("Action Planner returned an unsupported tool.");
+  }
+
+  if (actionTools.length > 0 && (actionTools.length !== 2 || actionTools[0] !== "createRefund" || actionTools[1] !== "updateTicketStatus")) {
+    throw new Error("Action Planner must create a refund before synchronizing ticket status.");
+  }
+
+  return actionPlan;
+}
+
 /** 基础核查完成后，基于真实证据决定是否追加高风险退款动作。 */
 async function buildActionPlanStep(run: AgentRun, ticketContext: unknown, index: number) {
   const actionPlanResult = await measureStep(() =>
@@ -489,27 +519,11 @@ async function buildActionPlanStep(run: AgentRun, ticketContext: unknown, index:
       signal: getRunAbortSignal(run.id),
     }),
   );
-  let actionPlan = parseAgentPlan(actionPlanResult.value.text, true);
-  const refundEvidence = `${run.task}\n${JSON.stringify(ticketContext)}`;
-  const hasExplicitRefundRequest = /申请退款|退款诉求|创建(?:必要的)?退款|创建退款记录|退款申请/.test(refundEvidence);
-
-  if (actionPlan.steps.some((step) => step.allowedTools[0] === "createRefund") && !hasExplicitRefundRequest) {
-    // 只有明确退款诉求才能解锁写入；“判断是否需要退款”或其他咨询不能被模型擅自升级。
-    actionPlan = {
-      version: 1,
-      summary: "现有任务与工单没有明确退款诉求，服务端安全边界阻止退款写入。",
-      steps: [],
-    };
-  }
-  const actionTools = actionPlan.steps.map((step) => step.allowedTools[0]);
-
-  if (actionTools.some((toolName) => toolName !== "createRefund" && toolName !== "updateTicketStatus")) {
-    throw new Error("Action Planner returned an unsupported tool.");
-  }
-
-  if (actionTools.length > 0 && (actionTools.length !== 2 || actionTools[0] !== "createRefund" || actionTools[1] !== "updateTicketStatus")) {
-    throw new Error("Action Planner must create a refund before synchronizing ticket status.");
-  }
+  const actionPlan = constrainActionPlan(
+    parseAgentPlan(actionPlanResult.value.text, true),
+    run.task,
+    ticketContext,
+  );
 
   return {
     plan: actionPlan,
