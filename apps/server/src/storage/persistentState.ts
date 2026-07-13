@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { AgentRun, ApprovalRequest, ConversationSession, EvaluationRun } from "@agentflow/shared";
+import { StorageWriteError } from "../agent/errors.js";
 
 interface PersistedState {
   version: 1;
@@ -20,6 +21,8 @@ const emptyState: PersistedState = {
 
 const dataFilePath = join(process.env.AGENTFLOW_DATA_DIR ?? join(process.cwd(), ".agentflow-data"), "server-state.json");
 const RENAME_RETRY_LIMIT = 5;
+let persistenceDegraded = false;
+let lastPersistenceError: string | undefined;
 
 function waitSync(ms: number) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -62,6 +65,8 @@ export function readPersistentState(): PersistedState {
       evaluationRuns: Array.isArray(parsed.evaluationRuns) ? parsed.evaluationRuns : [],
     };
   } catch (error) {
+    persistenceDegraded = true;
+    lastPersistenceError = error instanceof Error ? error.message : String(error);
     console.warn("[persistent-state] Failed to read state file, starting with empty state.", error);
     return cloneState(emptyState);
   }
@@ -69,16 +74,40 @@ export function readPersistentState(): PersistedState {
 
 /** 原子写入本地 JSON 快照，避免进程中断时留下半截状态文件。 */
 export function writePersistentState(state: PersistedState) {
-  mkdirSync(dirname(dataFilePath), { recursive: true });
+  // 首次失败后保留各 Store 的内存状态，避免错误落盘流程再次抛错并覆盖原始异常。
+  if (persistenceDegraded) {
+    return false;
+  }
 
   const tempFilePath = `${dataFilePath}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
-  writeFileSync(tempFilePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 
   try {
+    mkdirSync(dirname(dataFilePath), { recursive: true });
+    writeFileSync(tempFilePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
     renameWithRetry(tempFilePath, dataFilePath);
+    return true;
   } catch (error) {
-    throw error;
+    if (existsSync(tempFilePath)) {
+      try {
+        rmSync(tempFilePath, { force: true });
+      } catch {
+        // 临时文件清理失败不覆盖原始持久化异常。
+      }
+    }
+    persistenceDegraded = true;
+    lastPersistenceError = error instanceof Error ? error.message : String(error);
+    throw new StorageWriteError(dataFilePath, { cause: error });
   }
+}
+
+/** 健康检查通过该状态暴露持久化降级，便于 Demo 和部署监控及时发现数据只保留在内存。 */
+export function getPersistenceHealth() {
+  return {
+    ok: !persistenceDegraded,
+    degraded: persistenceDegraded,
+    path: dataFilePath,
+    lastError: lastPersistenceError,
+  };
 }
 
 /** 暴露当前数据文件位置，便于 README 和调试日志说明。 */

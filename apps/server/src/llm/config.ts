@@ -13,6 +13,8 @@ export interface LlmConfig {
   model: string;
   mock: boolean;
   fallbackOnError: boolean;
+  requestTimeoutMs: number;
+  maxRetries: number;
 }
 
 /** 将环境变量中的布尔字符串转换成 boolean，并提供默认值。 */
@@ -22,6 +24,11 @@ function readBoolean(value: string | undefined, fallback: boolean) {
   }
 
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+}
+
+function readNonNegativeNumber(value: string | undefined, fallback: number) {
+  const parsed = value == null ? Number.NaN : Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 /**
@@ -44,5 +51,7 @@ export function getLlmConfig(): LlmConfig {
     model: process.env.OPENAI_MODEL ?? process.env.LLM_MODEL ?? process.env.DEEPSEEK_MODEL ?? defaultModel,
     mock: readBoolean(process.env.LLM_MOCK, !apiKey),
     fallbackOnError: readBoolean(process.env.LLM_FALLBACK_ON_ERROR, true),
+    requestTimeoutMs: readNonNegativeNumber(process.env.LLM_REQUEST_TIMEOUT_MS, 60_000),
+    maxRetries: Math.floor(readNonNegativeNumber(process.env.LLM_MAX_RETRIES, 2)),
   };
 }

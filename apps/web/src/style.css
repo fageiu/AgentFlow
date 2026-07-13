@@ -839,6 +839,21 @@ button:disabled {
   background: #ecfdf5;
 }
 
+.run-flow-step-meta .run-flow-fallback {
+  color: #9a3412;
+  background: #ffedd5;
+}
+
+.run-flow-fallback-notice,
+.agent-fallback-warning {
+  margin: 8px 0 0;
+  border-left: 3px solid #fb923c;
+  padding: 7px 10px;
+  color: #9a3412;
+  background: #fff7ed;
+  font-size: 12px;
+}
+
 .run-flow-step-meta .run-flow-state {
   color: #334155;
   background: #eef2f7;
@@ -1169,11 +1184,13 @@ button:disabled {
   color: #c2410c;
 }
 
-.plan-progress-skipped {
+.plan-progress-skipped,
+.plan-progress-cancelled {
   color: #94a3b8;
 }
 
-.plan-progress-skipped .plan-progress-mark {
+.plan-progress-skipped .plan-progress-mark,
+.plan-progress-cancelled .plan-progress-mark {
   border-color: #e2e8f0;
   color: #94a3b8;
   background: #f8fafc;

@@ -632,7 +632,8 @@ async function applyRunEvent(event: Event) {
       status: payload.run.status,
       steps: payload.run.steps,
       content: "Agent 执行已取消。",
-      errorMessage: "本次执行已取消，可重试上一条任务。",
+      // 取消是用户主动终止，不应复用失败态错误字段。
+      errorMessage: undefined,
     }));
     closeStream();
     await refreshSandboxState();

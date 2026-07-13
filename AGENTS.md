@@ -23,6 +23,7 @@
 - `apps/server/src/agent/executor.ts`：Agent 执行流程、步骤事件生成、Tool Calling 循环和审批暂停/恢复。
 - `apps/server/src/agent/errors.ts`：Agent 统一错误模型，负责错误分类、用户提示、结构化错误码和 SSE error payload。
 - `apps/server/src/agent/runControl.ts`：AgentRun 取消请求的进程内控制状态，executor 在步骤边界读取它来停止执行。
+- `apps/server/src/agent/cancelRun.ts`：取消生命周期校验与审批唤醒编排，负责区分不存在、已结束、已取消和可取消 run。
 - `apps/server/src/approval/approvalStore.ts`：高风险工具调用的内存审批状态。
 - `apps/server/src/llm/*`：LLM 配置、Prompt 和 Provider 封装。
 - `apps/server/src/trace/runStore.ts`：AgentRun trace 历史的内存存储与摘要查询。
@@ -40,6 +41,7 @@
 - Prompt 模板统一放在 `apps/server/src/llm/prompts.ts`，避免散落在执行器里。
 - 没有 API Key 时必须保持 Mock fallback，保证本地 Demo 可运行。
 - Tool Calling 消息统一使用 `apps/server/src/llm/types.ts` 中的内部类型，再由 provider 转换为 OpenAI-compatible 请求格式。
+- Provider 请求必须复用统一的超时、429/5xx 重试和取消信号；触发 Mock fallback 时必须写入结构化 fallback 元数据，不能把调试文本混入模型结构化输出。
 
 ## Tool Registry 约定
 
@@ -49,6 +51,7 @@
 - executor 不直接调用业务函数，统一通过 `runTool()` 执行，保证 trace、参数校验和风险等级可复用。
 - 只有 `listAgentTools()` 返回的工具会交给 LLM 自主调用；演示控制类工具例如 `resetSandboxState` 不应暴露给模型。
 - 查询类工具例如 `listTickets`、`searchTickets` 应保持 `riskLevel: "read"`，用于只读业务问答，不应产生退款、审批或状态变更。
+- 退款创建与工单状态同步属于同一业务写入单元；后续写入失败或 run 取消时必须调用定向补偿，避免留下部分成功状态。
 
 ## Human Approval 约定
 
@@ -84,3 +87,4 @@
 - executor 需要维护 run 级 `metrics`，包含 LLM 调用次数、工具调用次数、模型名和 token usage，评测汇总直接复用这些指标。
 - provider 如果拿不到真实 usage，应为 Mock/fallback 提供估算 token，保证本地 Demo 的评测看板不缺指标。
 - 每次评测 run 需要保存 provider、model、promptVersion 和 mock/real 模式，便于对比不同模型或 Prompt 配置效果。
+- 真实 Provider 评测中只要触发 Mock fallback，该 case 不得判定为通过。

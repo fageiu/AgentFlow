@@ -17,6 +17,8 @@ import {
 } from "../approval/approvalStore.js";
 import {
   AgentExecutionError,
+  AgentLoopLimitError,
+  ToolNotAvailableError,
   createAgentErrorEvent,
   formatAgentErrorDetail,
   normalizeAgentError,
@@ -32,7 +34,19 @@ import {
 import type { LlmChatMessage, LlmToolCall } from "../llm/types.js";
 import { saveRun } from "../trace/runStore.js";
 import { isAgentToolName, listAgentTools, runTool, toolRegistry, type ToolName } from "../tools/toolRegistry.js";
-import { AgentRunCancelledError, clearRunCancel, throwIfRunCancelled } from "./runControl.js";
+import {
+  beginRefundWorkflowTransaction,
+  commitRefundWorkflowTransaction,
+  rollbackRefundWorkflowTransaction,
+} from "../tools/sandboxTools.js";
+import {
+  AgentRunCancelledError,
+  clearRunCancel,
+  getRunAbortSignal,
+  getRunCancel,
+  registerRunControl,
+  throwIfRunCancelled,
+} from "./runControl.js";
 
 const STEP_DELAY_MS = 250;
 const MAX_TOOL_LOOP_TURNS = 10;
@@ -83,6 +97,7 @@ function createEmptyRunMetrics(): AgentRunMetrics {
   return {
     llmCallCount: 0,
     toolCallCount: 0,
+    fallbackCount: 0,
     modelNames: [],
     tokenUsage: createEmptyTokenUsage(),
   };
@@ -97,10 +112,11 @@ function addTokenUsage(left: LlmTokenUsage, right: LlmTokenUsage): LlmTokenUsage
 }
 
 /** 汇总 run 级 LLM 指标，评测系统会基于它统计 token、模型和平均调用成本。 */
-function recordLlmUsage(run: AgentRun, modelName: string, tokenUsage: LlmTokenUsage) {
+function recordLlmUsage(run: AgentRun, modelName: string, tokenUsage: LlmTokenUsage, fallbackTriggered = false) {
   const metrics = run.metrics ?? createEmptyRunMetrics();
   metrics.llmCallCount += 1;
   metrics.tokenUsage = addTokenUsage(metrics.tokenUsage, tokenUsage);
+  metrics.fallbackCount = (metrics.fallbackCount ?? 0) + (fallbackTriggered ? 1 : 0);
 
   if (!metrics.modelNames.includes(modelName)) {
     metrics.modelNames.push(modelName);
@@ -407,7 +423,7 @@ async function buildToolStep(run: AgentRun, index: number, toolCall: LlmToolCall
   const toolName = toolCall.name;
 
   if (!isAgentToolName(toolName)) {
-    throw new Error(`Tool is not available to agent: ${toolName}`);
+    throw new ToolNotAvailableError(toolName);
   }
 
   const measured = await measureStep(() => runTool(toolName, toolCall.arguments));
@@ -429,16 +445,17 @@ async function buildToolStep(run: AgentRun, index: number, toolCall: LlmToolCall
 }
 
 /** 生成计划 step，Planner 可使用预读取的工单详情避免只按任务文本猜测范围。 */
-async function buildPlanStep(task: string, index: number, ticketContext?: unknown) {
-  const planPrompt = buildPlanPrompt(task, ticketContext ? { ticketContext } : undefined);
+async function buildPlanStep(run: AgentRun, index: number, ticketContext?: unknown) {
+  const planPrompt = buildPlanPrompt(run.task, ticketContext ? { ticketContext } : undefined);
   const plan = await measureStep(() =>
     generateText({
       ...planPrompt,
       temperature: 0.2,
+      signal: getRunAbortSignal(run.id),
     }),
   );
 
-  const planValue = completeInitialPlanCoverage(parseAgentPlan(plan.value.text), task, Boolean(ticketContext));
+  const planValue = completeInitialPlanCoverage(parseAgentPlan(plan.value.text), run.task, Boolean(ticketContext));
 
   return {
     plan: planValue,
@@ -451,6 +468,7 @@ async function buildPlanStep(task: string, index: number, ticketContext?: unknow
       toolName: plan.value.model,
       modelName: plan.value.model,
       tokenUsage: plan.value.tokenUsage,
+      fallback: plan.value.fallback,
       status: "completed",
     }),
   };
@@ -468,6 +486,7 @@ async function buildActionPlanStep(run: AgentRun, ticketContext: unknown, index:
         businessDate: process.env.AGENTFLOW_BUSINESS_DATE ?? "2026-07-01",
       }),
       temperature: 0.1,
+      signal: getRunAbortSignal(run.id),
     }),
   );
   let actionPlan = parseAgentPlan(actionPlanResult.value.text, true);
@@ -506,6 +525,7 @@ async function buildActionPlanStep(run: AgentRun, ticketContext: unknown, index:
       toolName: actionPlanResult.value.model,
       modelName: actionPlanResult.value.model,
       tokenUsage: actionPlanResult.value.tokenUsage,
+      fallback: actionPlanResult.value.fallback,
       status: "completed",
     }),
   };
@@ -626,7 +646,7 @@ function completeInitialPlanCoverage(plan: AgentPlan, task: string, hasTicketCon
 
 /** 工具观察表明原计划需要调整时，仅为尚未完成的部分生成新计划。 */
 async function buildReplanStep(
-  task: string,
+  run: AgentRun,
   completedSteps: AgentPlanStep[],
   requiredFirstTool: string,
   observation: string,
@@ -635,12 +655,13 @@ async function buildReplanStep(
 ) {
   const replan = await measureStep(() =>
     generateText({
-      ...buildPlanPrompt(task, {
+      ...buildPlanPrompt(run.task, {
         completedTools: completedSteps.flatMap((step) => step.allowedTools),
         observation,
         ticketContext,
       }),
       temperature: 0.1,
+      signal: getRunAbortSignal(run.id),
     }),
   );
   const remainingPlan = parseAgentPlan(replan.value.text);
@@ -665,6 +686,7 @@ async function buildReplanStep(
       toolName: replan.value.model,
       modelName: replan.value.model,
       tokenUsage: replan.value.tokenUsage,
+      fallback: replan.value.fallback,
       status: "completed",
     }),
   };
@@ -774,10 +796,11 @@ async function buildFinalConclusionStep(run: AgentRun, index: number, candidate:
     generateText({
       ...finalPrompt,
       temperature: 0.1,
+      signal: getRunAbortSignal(run.id),
     }),
   );
 
-  recordLlmUsage(run, final.value.model, final.value.tokenUsage);
+  recordLlmUsage(run, final.value.model, final.value.tokenUsage, Boolean(final.value.fallback));
 
   return createStep({
     index,
@@ -788,6 +811,7 @@ async function buildFinalConclusionStep(run: AgentRun, index: number, candidate:
     toolName: final.value.model,
     modelName: final.value.model,
     tokenUsage: final.value.tokenUsage,
+    fallback: final.value.fallback,
     status: "completed",
   });
 }
@@ -822,11 +846,12 @@ async function enrichErrorWithLlmSummary(run: AgentRun, error: AgentErrorInfo) {
       generateText({
         ...prompt,
         temperature: 0.1,
+        signal: getRunAbortSignal(run.id),
       }),
     );
     const parsed = parseErrorSummaryText(summary.value.text);
 
-    recordLlmUsage(run, summary.value.model, summary.value.tokenUsage);
+    recordLlmUsage(run, summary.value.model, summary.value.tokenUsage, Boolean(summary.value.fallback));
 
     return {
       ...error,
@@ -873,7 +898,7 @@ async function* requestApprovalForTool(
   const toolName = toolCall.name;
 
   if (!isAgentToolName(toolName)) {
-    throw new Error(`Tool is not available to agent: ${toolName}`);
+    throw new ToolNotAvailableError(toolName);
   }
 
   const { approval, decision } = createApprovalRequest({
@@ -915,7 +940,6 @@ async function* requestApprovalForTool(
   }
 
   const result = await decision;
-  throwIfRunCancelled(run);
   const resolvedApproval: ApprovalRequest = {
     ...approval,
     status: result.status,
@@ -923,8 +947,18 @@ async function* requestApprovalForTool(
     resolvedAt: new Date().toISOString(),
   };
 
-  run.status = "running";
+  // 先把审批决议写回 trace，再检查取消，避免审批已删除但历史步骤仍显示等待中。
   resolveApprovalStep(run, resolvedApproval);
+  if (getRunCancel(run.id)) {
+    const approvalStep = run.steps.find((step) => step.approvalRequest?.id === resolvedApproval.id);
+    if (approvalStep) {
+      approvalStep.status = "cancelled";
+    }
+  }
+  saveRun(run);
+  throwIfRunCancelled(run);
+
+  run.status = "running";
   saveRun(run);
 
   yield {
@@ -953,11 +987,11 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
   }
   throwIfRunCancelled(run);
 
-  const planned = await buildPlanStep(run.task, stepIndex++, ticketContext?.ticket);
+  const planned = await buildPlanStep(run, stepIndex++, ticketContext?.ticket);
   let activePlan = planned.plan;
   run.plan = activePlan;
   if (planned.step.modelName && planned.step.tokenUsage) {
-    recordLlmUsage(run, planned.step.modelName, planned.step.tokenUsage);
+    recordLlmUsage(run, planned.step.modelName, planned.step.tokenUsage, Boolean(planned.step.fallback));
   }
   yield addStep(run, planned.step);
   throwIfRunCancelled(run);
@@ -975,7 +1009,12 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
 
     if (!activePlanStep && !actionDecisionCompleted && ticketContext) {
       const actionPlan = await buildActionPlanStep(run, ticketContext.ticket, stepIndex++);
-      recordLlmUsage(run, actionPlan.step.modelName ?? "unknown", actionPlan.step.tokenUsage ?? createEmptyTokenUsage());
+      recordLlmUsage(
+        run,
+        actionPlan.step.modelName ?? "unknown",
+        actionPlan.step.tokenUsage ?? createEmptyTokenUsage(),
+        Boolean(actionPlan.step.fallback),
+      );
       actionDecisionCompleted = true;
       yield addStep(run, actionPlan.step);
 
@@ -1011,9 +1050,10 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
         messages,
         tools,
         temperature: 0.2,
+        signal: getRunAbortSignal(run.id),
       }),
     );
-    recordLlmUsage(run, assistant.value.model, assistant.value.tokenUsage);
+    recordLlmUsage(run, assistant.value.model, assistant.value.tokenUsage, Boolean(assistant.value.fallback));
     const toolCalls = assistant.value.message.toolCalls ?? [];
 
     messages.push({
@@ -1033,7 +1073,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
         throwIfRunCancelled(run);
         try {
           if (!isAgentToolName(toolCall.name)) {
-            throw new Error(`Tool is not available to agent: ${toolCall.name}`);
+            throw new ToolNotAvailableError(toolCall.name);
           }
 
           if (!activePlanStep) {
@@ -1062,6 +1102,10 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
             }
           }
 
+          if (toolCall.name === "createRefund" && typeof toolCall.arguments.orderId === "string") {
+            beginRefundWorkflowTransaction(run.id, toolCall.arguments.orderId);
+          }
+
           const toolStep = await buildToolStep(run, stepIndex++, toolCall);
           messages.push(toolStep.toolMessage);
           yield addStep(run, toolStep.step);
@@ -1071,11 +1115,17 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
             // 只有对应失败工具真正成功后，才能解除恢复锁并允许最终结论。
             pendingRecovery = undefined;
           }
+          if (toolCall.name === "updateTicketStatus") {
+            commitRefundWorkflowTransaction(run.id);
+          }
           throwIfRunCancelled(run);
         } catch (error) {
+          rollbackRefundWorkflowTransaction(run.id);
           if (error instanceof AgentRunCancelledError) {
             throw error;
           }
+          // 工具报错与用户取消并发时，以取消为最终语义，避免 run 被错误记录为 failed。
+          throwIfRunCancelled(run);
 
           recordToolCall(run);
           const failedToolStep = buildFailedToolStep(stepIndex++, toolCall, error);
@@ -1108,14 +1158,19 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
             messages.push(buildToolErrorMessage(toolCall, traceError, nextRetryAttempt));
             const completedPlanSteps = activePlan.steps.slice(0, activePlanStepIndex);
             const replanned = await buildReplanStep(
-              run.task,
+              run,
               completedPlanSteps,
               toolCall.name,
               traceError.detailMessage ?? traceError.message,
               stepIndex++,
               ticketContext?.ticket,
             );
-            recordLlmUsage(run, replanned.step.modelName ?? "unknown", replanned.step.tokenUsage ?? createEmptyTokenUsage());
+            recordLlmUsage(
+              run,
+              replanned.step.modelName ?? "unknown",
+              replanned.step.tokenUsage ?? createEmptyTokenUsage(),
+              Boolean(replanned.step.fallback),
+            );
             activePlan = {
               version: 1,
               summary: replanned.plan.summary,
@@ -1219,12 +1274,14 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
     throw new Error("LLM returned neither tool calls nor final content.");
   }
 
-  throw new Error(`LLM tool calling loop exceeded ${MAX_TOOL_LOOP_TURNS} turns.`);
+  throw new AgentLoopLimitError(MAX_TOOL_LOOP_TURNS);
 }
 
 /** 一次性执行 Agent 任务；评测可显式模拟批准或拒绝高风险调用。 */
 export async function runAgentTask(task: string, approvalMode: "approve" | "reject" = "approve"): Promise<AgentRun> {
   const run = createRun(task, "running");
+  registerRunControl(run.id);
+  saveRun(run);
 
   try {
     for await (const event of buildAgentEvents(run, approvalMode === "approve" ? "auto" : "auto-reject")) {
@@ -1233,12 +1290,15 @@ export async function runAgentTask(task: string, approvalMode: "approve" | "reje
       }
     }
 
+    // 收敛到 completed 前再次检查，关闭最后一步结束与取消请求并发时的竞态窗口。
+    throwIfRunCancelled(run);
     run.status = "completed";
     run.completedAt = new Date().toISOString();
     saveRun(run);
     clearRunCancel(run.id);
     return run;
   } catch (error) {
+    rollbackRefundWorkflowTransaction(run.id);
     if (error instanceof AgentRunCancelledError) {
       run.status = "cancelled";
       run.completedAt = new Date().toISOString();
@@ -1258,6 +1318,9 @@ export async function runAgentTask(task: string, approvalMode: "approve" | "reje
 /** 流式执行 Agent 任务，SSE 路由会把每个事件实时写给前端。 */
 export async function* streamAgentTask(task: string): AsyncGenerator<AgentRunEvent> {
   const run = createRun(task, "running");
+  registerRunControl(run.id);
+  // run_started 后前端即可发起取消，因此必须先写入 runStore，供取消接口校验生命周期。
+  saveRun(run);
 
   yield {
     kind: "run_started",
@@ -1271,6 +1334,8 @@ export async function* streamAgentTask(task: string): AsyncGenerator<AgentRunEve
       yield event;
     }
 
+    // 最后一个事件发出后仍可能收到取消请求，终态写入前必须再确认一次。
+    throwIfRunCancelled(run);
     run.status = "completed";
     run.completedAt = new Date().toISOString();
     saveRun(run);
@@ -1281,6 +1346,7 @@ export async function* streamAgentTask(task: string): AsyncGenerator<AgentRunEve
       run,
     };
   } catch (error) {
+    rollbackRefundWorkflowTransaction(run.id);
     if (error instanceof AgentRunCancelledError) {
       run.status = "cancelled";
       run.completedAt = new Date().toISOString();

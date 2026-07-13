@@ -5,7 +5,7 @@ import AgentStepDetail from "./AgentStepDetail.vue";
 import { buildStepErrorSummary } from "../utils/errors";
 import { buildCompactTraceItems, getStepPlan } from "../utils/trace";
 
-type PlanProgressStatus = "completed" | "failed" | "rejected" | "skipped" | "approval" | "running" | "current" | "pending";
+type PlanProgressStatus = "completed" | "failed" | "rejected" | "skipped" | "cancelled" | "approval" | "running" | "current" | "pending";
 
 interface PlanProgressItem {
   step: AgentPlanStep;
@@ -57,7 +57,7 @@ const planProgress = computed(() => {
       return { step: planStep, status: "approval", approvalStep };
     }
     if (latest?.approvalRequest?.status === "rejected") {
-      return { step: planStep, status: "rejected" };
+      return { step: planStep, status: props.status === "cancelled" ? "cancelled" : "rejected" };
     }
     if (latest?.status === "failed") {
       return {
@@ -85,6 +85,15 @@ const planProgress = computed(() => {
     }
   }
 
+  // 取消后已完成步骤保持原状态，尚未开始或仍在等待的步骤统一标记为未执行。
+  if (props.status === "cancelled") {
+    for (const item of items) {
+      if (item.status === "pending" || item.status === "running" || item.status === "approval") {
+        item.status = "cancelled";
+      }
+    }
+  }
+
   if (props.status === "running") {
     const nextItem = items.find((item) => item.status === "pending");
     if (nextItem) {
@@ -98,6 +107,7 @@ const planProgress = computed(() => {
     completed: items.filter((item) => item.status === "completed").length,
     rejected: items.filter((item) => item.status === "rejected").length,
     skipped: items.filter((item) => item.status === "skipped").length,
+    cancelled: items.filter((item) => item.status === "cancelled").length,
   };
 });
 
@@ -126,6 +136,7 @@ function getPlanMark(status: PlanProgressStatus) {
     failed: "!",
     rejected: "×",
     skipped: "—",
+    cancelled: "—",
     approval: "◆",
     running: "…",
     current: "›",
@@ -139,6 +150,7 @@ function getPlanStatusLabel(status: PlanProgressStatus) {
     failed: "需处理",
     rejected: "已拒绝",
     skipped: "已跳过",
+    cancelled: "未执行",
     approval: "等待审批",
     running: "执行中",
     current: "下一步",
@@ -179,6 +191,7 @@ const streamingActivity = computed(() => {
         {{ planProgress.completed }} 已完成
         <template v-if="planProgress.rejected"> · {{ planProgress.rejected }} 已拒绝</template>
         <template v-if="planProgress.skipped"> · {{ planProgress.skipped }} 已跳过</template>
+        <template v-if="planProgress.cancelled"> · {{ planProgress.cancelled }} 未执行</template>
       </span>
       <span v-else>{{ status === "running" ? "正在准备" : `${steps.length} 步` }}</span>
     </div>

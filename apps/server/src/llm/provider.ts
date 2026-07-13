@@ -1,5 +1,11 @@
-import { getLlmConfig } from "./config.js";
+import { getLlmConfig, type LlmConfig } from "./config.js";
 import type { LlmTokenUsage } from "@agentflow/shared";
+import {
+  AgentTypedError,
+  LlmProviderError,
+  LlmResponseFormatError,
+  LlmTimeoutError,
+} from "../agent/errors.js";
 import type {
   GenerateChatInput,
   GenerateChatResult,
@@ -57,6 +63,126 @@ function parseUsage(data: ChatCompletionResponse, fallback: LlmTokenUsage): LlmT
     completionTokens,
     totalTokens: data.usage?.total_tokens ?? promptTokens + completionTokens,
   };
+}
+
+/** 取消信号优先于 Mock fallback，避免用户取消后又降级执行一遍本地模型逻辑。 */
+function throwIfRequestAborted(signal?: AbortSignal) {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  if (signal.reason instanceof Error) {
+    throw signal.reason;
+  }
+
+  throw new Error("LLM request was aborted.");
+}
+
+function createAttemptSignal(externalSignal: AbortSignal | undefined, timeoutMs: number) {
+  const controller = new AbortController();
+  const abortFromExternal = () => controller.abort(externalSignal?.reason);
+
+  if (externalSignal?.aborted) {
+    abortFromExternal();
+  } else {
+    externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
+  }
+
+  const timeout = timeoutMs > 0
+    ? setTimeout(() => controller.abort(new LlmTimeoutError(timeoutMs)), timeoutMs)
+    : undefined;
+
+  return {
+    signal: controller.signal,
+    cleanup() {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      externalSignal?.removeEventListener("abort", abortFromExternal);
+    },
+  };
+}
+
+function parseRetryAfterMs(value: string | null) {
+  if (!value) {
+    return undefined;
+  }
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, seconds * 1_000);
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : undefined;
+}
+
+async function waitForProviderRetry(ms: number, signal?: AbortSignal) {
+  throwIfRequestAborted(signal);
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", handleAbort);
+      resolve();
+    }, ms);
+    const handleAbort = () => {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", handleAbort);
+      reject(signal?.reason instanceof Error ? signal.reason : new Error("LLM retry was aborted."));
+    };
+    signal?.addEventListener("abort", handleAbort, { once: true });
+  });
+}
+
+/** OpenAI-compatible 请求统一处理超时、429/5xx 重试和有限错误正文，避免两个入口各自实现一套。 */
+async function requestChatCompletion(config: LlmConfig, body: Record<string, unknown>, signal?: AbortSignal) {
+  for (let attempt = 0; attempt <= config.maxRetries; attempt += 1) {
+    const attemptSignal = createAttemptSignal(signal, config.requestTimeoutMs);
+
+    try {
+      const response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: attemptSignal.signal,
+      });
+
+      if (response.ok) {
+        return response;
+      }
+
+      const responseBody = (await response.text()).slice(0, 1_000);
+      const retryable = response.status === 429 || response.status >= 500;
+      throw new LlmProviderError(`LLM request failed: ${response.status} ${responseBody}`, {
+        status: response.status,
+        attempt: attempt + 1,
+        retryAfterMs: parseRetryAfterMs(response.headers.get("retry-after")),
+      }, { retryable });
+    } catch (error) {
+      throwIfRequestAborted(signal);
+      const providerError = error instanceof AgentTypedError
+        ? error
+        : new LlmProviderError("LLM network request failed.", { attempt: attempt + 1 }, { cause: error });
+      const canRetry = providerError.agentError.retryable && attempt < config.maxRetries;
+
+      if (!canRetry) {
+        throw providerError;
+      }
+
+      const retryAfterMs = providerError.agentError.details?.retryAfterMs;
+      const delayMs = typeof retryAfterMs === "number"
+        ? Math.min(retryAfterMs, 10_000)
+        : Math.min(250 * (2 ** attempt), 2_000);
+      await waitForProviderRetry(delayMs, signal);
+    } finally {
+      attemptSignal.cleanup();
+    }
+  }
+
+  throw new LlmProviderError("LLM request retry loop ended unexpectedly.");
 }
 
 /** Mock Planner 也输出与真实模型一致的结构化计划，保证本地演示走同一授权链路。 */
@@ -616,9 +742,14 @@ function parseToolCallArguments(raw: string | undefined) {
     return {};
   }
 
-  const parsed = JSON.parse(raw) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch (error) {
+    throw new LlmResponseFormatError("LLM tool call arguments are not valid JSON.", {}, { cause: error });
+  }
   if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("LLM tool call arguments must be a JSON object.");
+    throw new LlmResponseFormatError("LLM tool call arguments must be a JSON object.");
   }
 
   return parsed as Record<string, unknown>;
@@ -628,7 +759,7 @@ function parseAssistantMessage(data: ChatCompletionResponse): GenerateChatResult
   const message = data.choices?.[0]?.message;
 
   if (!message) {
-    throw new Error("LLM response does not contain assistant message.");
+    throw new LlmResponseFormatError("LLM response does not contain assistant message.");
   }
 
   return {
@@ -636,7 +767,7 @@ function parseAssistantMessage(data: ChatCompletionResponse): GenerateChatResult
     toolCalls: message.tool_calls?.map((toolCall, index) => {
       const name = toolCall.function?.name;
       if (!name) {
-        throw new Error("LLM tool call does not contain function name.");
+        throw new LlmResponseFormatError("LLM tool call does not contain function name.");
       }
 
       return {
@@ -651,37 +782,32 @@ function parseAssistantMessage(data: ChatCompletionResponse): GenerateChatResult
 /** 统一的文本生成入口，当前用于计划和兼容旧的最终总结。 */
 export async function generateText(input: GenerateTextInput): Promise<GenerateTextResult> {
   const config = getLlmConfig();
+  throwIfRequestAborted(input.signal);
 
   if (config.mock || !config.apiKey || config.provider === "mock") {
     return createMockTextResult(input);
   }
 
   try {
-    const response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: [
-          { role: "system", content: input.system },
-          { role: "user", content: input.user },
-        ],
-        temperature: input.temperature ?? 0.2,
-      }),
-    });
+    const response = await requestChatCompletion(config, {
+      model: config.model,
+      messages: [
+        { role: "system", content: input.system },
+        { role: "user", content: input.user },
+      ],
+      temperature: input.temperature ?? 0.2,
+    }, input.signal);
 
-    if (!response.ok) {
-      throw new Error(`LLM request failed: ${response.status} ${await response.text()}`);
+    let data: ChatCompletionResponse;
+    try {
+      data = (await response.json()) as ChatCompletionResponse;
+    } catch (error) {
+      throw new LlmResponseFormatError("LLM response is not valid JSON.", {}, { cause: error });
     }
-
-    const data = (await response.json()) as ChatCompletionResponse;
     const text = data.choices?.[0]?.message?.content?.trim();
 
     if (!text) {
-      throw new Error("LLM response does not contain message content.");
+      throw new LlmResponseFormatError("LLM response does not contain message content.");
     }
 
     return {
@@ -692,6 +818,7 @@ export async function generateText(input: GenerateTextInput): Promise<GenerateTe
       tokenUsage: parseUsage(data, createTokenUsage(`${input.system}\n${input.user}`, text)),
     };
   } catch (error) {
+    throwIfRequestAborted(input.signal);
     if (!config.fallbackOnError) {
       throw error;
     }
@@ -700,8 +827,11 @@ export async function generateText(input: GenerateTextInput): Promise<GenerateTe
     const message = error instanceof Error ? error.message : "unknown LLM error";
     return {
       ...result,
-      text: `${result.text}\n\n[Mock fallback: ${message}]`,
-      tokenUsage: createTokenUsage(`${input.system}\n${input.user}`, `${result.text}\n\n[Mock fallback: ${message}]`),
+      fallback: {
+        provider: config.provider,
+        model: config.model,
+        reason: message,
+      },
     };
   }
 }
@@ -709,32 +839,27 @@ export async function generateText(input: GenerateTextInput): Promise<GenerateTe
 /** 支持 Tool Calling 的统一 chat 入口，executor 只消费标准化后的 toolCalls。 */
 export async function generateChat(input: GenerateChatInput): Promise<GenerateChatResult> {
   const config = getLlmConfig();
+  throwIfRequestAborted(input.signal);
 
   if (config.mock || !config.apiKey || config.provider === "mock") {
     return createMockChatResult(input);
   }
 
   try {
-    const response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: input.messages.map(toOpenAiMessage),
-        tools: input.tools?.map(toOpenAiTool),
-        tool_choice: input.tools?.length ? "auto" : undefined,
-        temperature: input.temperature ?? 0.2,
-      }),
-    });
+    const response = await requestChatCompletion(config, {
+      model: config.model,
+      messages: input.messages.map(toOpenAiMessage),
+      tools: input.tools?.map(toOpenAiTool),
+      tool_choice: input.tools?.length ? "auto" : undefined,
+      temperature: input.temperature ?? 0.2,
+    }, input.signal);
 
-    if (!response.ok) {
-      throw new Error(`LLM request failed: ${response.status} ${await response.text()}`);
+    let data: ChatCompletionResponse;
+    try {
+      data = (await response.json()) as ChatCompletionResponse;
+    } catch (error) {
+      throw new LlmResponseFormatError("LLM response is not valid JSON.", {}, { cause: error });
     }
-
-    const data = (await response.json()) as ChatCompletionResponse;
     const message = parseAssistantMessage(data);
 
     return {
@@ -745,11 +870,19 @@ export async function generateChat(input: GenerateChatInput): Promise<GenerateCh
       tokenUsage: parseUsage(data, createTokenUsage(JSON.stringify(input.messages), JSON.stringify(message))),
     };
   } catch (error) {
+    throwIfRequestAborted(input.signal);
     if (!config.fallbackOnError) {
       throw error;
     }
 
     const message = error instanceof Error ? error.message : "unknown LLM error";
-    return createMockChatResult(input, `${config.model} -> mock-fallback`, message);
+    return {
+      ...createMockChatResult(input, `${config.model} -> mock-fallback`),
+      fallback: {
+        provider: config.provider,
+        model: config.model,
+        reason: message,
+      },
+    };
   }
 }

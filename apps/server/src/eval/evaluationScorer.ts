@@ -284,6 +284,18 @@ export function scoreEvaluationCase(input: {
     );
   }
 
+  const fallbackCount = input.run?.metrics?.fallbackCount ?? 0;
+  assertions.push(
+    createAssertion(
+      "no-mock-fallback",
+      "评测过程中未触发 Mock 降级",
+      fallbackCount === 0,
+      "0",
+      String(fallbackCount),
+      `本 case 有 ${fallbackCount} 次模型调用降级为 Mock，不能作为真实模型通过结果。`,
+    ),
+  );
+
   const failedAssertions = assertions.filter((assertion) => !assertion.passed);
   const hasUnexpectedError = Boolean(input.errorMessage && !expectations.errorMessageIncludes?.length);
   const status = hasUnexpectedError ? "error" : failedAssertions.length === 0 ? "passed" : "failed";

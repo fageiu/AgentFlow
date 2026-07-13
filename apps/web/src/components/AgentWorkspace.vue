@@ -135,7 +135,7 @@ defineExpose({
         />
 
         <AgentRunSummary
-          v-if="message.role === 'assistant' && (message.steps?.length ?? 0) > 0 && isAssistantTerminal(message)"
+          v-if="message.role === 'assistant' && Boolean(message.run) && isAssistantTerminal(message)"
           :run="message.run"
           :fallback-error-message="message.errorMessage"
           :final-message="getAssistantFinalMessage(message)"

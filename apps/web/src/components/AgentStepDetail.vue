@@ -21,7 +21,10 @@ defineEmits<{
 const errorSummary = computed(() => buildStepErrorSummary(props.step));
 const summary = computed(() => getStepSummary(props.step));
 const isPendingApproval = computed(() => props.step.approvalRequest?.status === "pending");
-const shouldShowSummary = computed(() => Boolean(errorSummary.value) || isPendingApproval.value || props.step.status !== "completed");
+const shouldShowSummary = computed(() => Boolean(errorSummary.value)
+  || Boolean(props.step.fallback)
+  || isPendingApproval.value
+  || props.step.status !== "completed");
 
 const statusMark = computed(() => {
   if (isPendingApproval.value) {
@@ -70,12 +73,17 @@ const approvalPreview = computed(() => {
 
         <div class="run-flow-step-meta">
           <span v-if="step.toolName" class="run-flow-tool">{{ step.toolName }}</span>
+          <span v-if="step.fallback" class="run-flow-fallback">Mock 降级</span>
           <span class="run-flow-state">{{ getStepStatusLabel(step.status) }}</span>
           <span v-if="step.durationMs != null">{{ step.durationMs }}ms</span>
         </div>
       </div>
 
       <p v-if="shouldShowSummary" class="run-flow-step-summary">{{ summary }}</p>
+
+      <p v-if="step.fallback" class="run-flow-fallback-notice">
+        {{ step.fallback.provider }}/{{ step.fallback.model }} 调用失败，本步骤已使用 Mock 结果。
+      </p>
 
       <p v-if="isPendingApproval" class="approval-preview">{{ approvalPreview }}</p>
 

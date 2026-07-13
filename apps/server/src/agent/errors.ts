@@ -3,15 +3,130 @@ import { ZodError } from "zod";
 
 export type AgentErrorCategory = "business" | "tool" | "llm" | "system";
 
-export class AgentExecutionError extends Error {
-  readonly agentError: AgentErrorInfo;
+/** 携带稳定错误码的基础异常，跨 Provider、工具和 Executor 边界时不再依赖 message 正则猜测类型。 */
+export class AgentTypedError extends Error {
+  constructor(public readonly agentError: AgentErrorInfo, options?: { cause?: unknown }) {
+    super(agentError.message, { cause: options?.cause });
+    this.name = "AgentTypedError";
+  }
+}
+
+export class AgentExecutionError extends AgentTypedError {
   readonly alreadyTraced: boolean;
 
   constructor(agentError: AgentErrorInfo, options?: { alreadyTraced?: boolean; cause?: unknown }) {
-    super(agentError.message, { cause: options?.cause });
+    super(agentError, { cause: options?.cause });
     this.name = "AgentExecutionError";
-    this.agentError = agentError;
     this.alreadyTraced = Boolean(options?.alreadyTraced);
+  }
+}
+
+export class BusinessDataNotFoundError extends AgentTypedError {
+  constructor(entity: "Ticket" | "Customer" | "Order" | "Policy", identifier: string) {
+    const entityLabels = {
+      Ticket: "工单",
+      Customer: "客户",
+      Order: "订单",
+      Policy: "业务规则",
+    } as const;
+    const label = entityLabels[entity];
+    super({
+      code: "BUSINESS_DATA_NOT_FOUND",
+      category: "business",
+      message: `${entity} not found: ${identifier}`,
+      userMessage: "没有找到请求的业务数据，请检查工单、客户、订单或规则 ID 是否正确。",
+      detailMessage: `查询${label}失败：未找到「${identifier}」对应的数据。`,
+      suggestion: `请确认${label}标识是否正确，或先通过只读查询确认可用数据。`,
+      retryable: false,
+      details: { entity, identifier },
+    });
+    this.name = "BusinessDataNotFoundError";
+  }
+}
+
+export class ToolNotAvailableError extends AgentTypedError {
+  constructor(toolName: string) {
+    super({
+      code: "TOOL_NOT_AVAILABLE",
+      category: "tool",
+      message: `Tool is not available to agent: ${toolName}`,
+      userMessage: "模型请求了当前 Agent 未开放的工具，本次执行已停止以避免越权操作。",
+      retryable: false,
+      details: { toolName },
+    });
+    this.name = "ToolNotAvailableError";
+  }
+}
+
+export class LlmProviderError extends AgentTypedError {
+  constructor(message: string, details: Record<string, unknown> = {}, options?: { cause?: unknown; retryable?: boolean }) {
+    super({
+      code: "LLM_PROVIDER_ERROR",
+      category: "llm",
+      message,
+      userMessage: "模型调用失败，请稍后重试或检查模型配置。",
+      retryable: options?.retryable ?? true,
+      details,
+    }, { cause: options?.cause });
+    this.name = "LlmProviderError";
+  }
+}
+
+export class LlmResponseFormatError extends AgentTypedError {
+  constructor(message: string, details: Record<string, unknown> = {}, options?: { cause?: unknown }) {
+    super({
+      code: "LLM_RESPONSE_FORMAT_ERROR",
+      category: "llm",
+      message,
+      userMessage: "模型返回格式不符合协议要求，本次执行已安全停止。",
+      retryable: true,
+      details,
+    }, { cause: options?.cause });
+    this.name = "LlmResponseFormatError";
+  }
+}
+
+export class LlmTimeoutError extends AgentTypedError {
+  constructor(timeoutMs: number) {
+    super({
+      code: "LLM_TIMEOUT",
+      category: "llm",
+      message: `LLM request timed out after ${timeoutMs}ms.`,
+      userMessage: "模型响应超时，系统已停止本次请求。",
+      retryable: true,
+      details: { timeoutMs },
+    });
+    this.name = "LlmTimeoutError";
+  }
+}
+
+export class AgentLoopLimitError extends AgentTypedError {
+  constructor(limit: number) {
+    super({
+      code: "AGENT_LOOP_LIMIT_EXCEEDED",
+      category: "system",
+      message: `LLM tool calling loop exceeded ${limit} turns.`,
+      userMessage: "Agent 工具调用轮次超过上限，系统已停止执行以避免无限循环。",
+      retryable: true,
+      details: { limit },
+    });
+    this.name = "AgentLoopLimitError";
+  }
+}
+
+export class StorageWriteError extends AgentTypedError {
+  constructor(path: string, options?: { cause?: unknown }) {
+    super({
+      code: "STORAGE_WRITE_ERROR",
+      category: "system",
+      message: `Failed to persist AgentFlow state: ${path}`,
+      userMessage: "运行状态持久化失败，系统已保留当前进程内快照。",
+      detailMessage: `无法写入本地状态文件：${path}`,
+      suggestion: "请检查数据目录权限、磁盘空间和文件占用情况后重启服务。",
+      retryable: true,
+      details: { path },
+    }, { cause: options?.cause });
+    this.name = "StorageWriteError";
   }
 }
 
@@ -75,7 +190,7 @@ function describeBusinessDataNotFound(message: string, details: Record<string, u
 
 /** 将底层异常归一化为 Agent 可展示、可记录、可评测的错误对象。 */
 export function normalizeAgentError(error: unknown, details: Record<string, unknown> = {}): AgentErrorInfo {
-  if (error instanceof AgentExecutionError) {
+  if (error instanceof AgentTypedError) {
     return {
       ...error.agentError,
       details: {
@@ -127,23 +242,24 @@ export function normalizeAgentError(error: unknown, details: Record<string, unkn
     });
   }
 
-  if (/LLM|model|chat completions|response/i.test(message)) {
-    return createAgentError({
-      code: "LLM_PROVIDER_ERROR",
-      category: "llm",
-      message,
-      userMessage: "模型调用失败或返回格式异常，请稍后重试或检查模型配置。",
-      retryable: true,
-      details,
-    });
-  }
-
+  // 循环上限属于执行器保护，不应因为错误文本包含 LLM 而误归类为 Provider 故障。
   if (/loop exceeded/i.test(message)) {
     return createAgentError({
       code: "AGENT_LOOP_LIMIT_EXCEEDED",
       category: "system",
       message,
       userMessage: "Agent 工具调用轮次超过上限，系统已停止执行以避免无限循环。",
+      retryable: true,
+      details,
+    });
+  }
+
+  if (/LLM|model|chat completions|response/i.test(message)) {
+    return createAgentError({
+      code: "LLM_PROVIDER_ERROR",
+      category: "llm",
+      message,
+      userMessage: "模型调用失败或返回格式异常，请稍后重试或检查模型配置。",
       retryable: true,
       details,
     });
@@ -177,4 +293,24 @@ export function createAgentErrorEvent(run: AgentRun, error: AgentErrorInfo): Ext
     error,
     run,
   };
+}
+
+/** 将结构化 Agent 错误映射为稳定 HTTP 状态，非流式接口与全局兜底共用。 */
+export function getAgentErrorHttpStatus(error: AgentErrorInfo) {
+  if (error.code === "BUSINESS_DATA_NOT_FOUND") {
+    return 404;
+  }
+  if (error.code === "TOOL_INPUT_VALIDATION_ERROR" || error.code === "TOOL_NOT_AVAILABLE") {
+    return 422;
+  }
+  if (error.code === "LLM_TIMEOUT") {
+    return 504;
+  }
+  if (error.category === "llm") {
+    return 502;
+  }
+  if (error.code === "STORAGE_WRITE_ERROR") {
+    return 503;
+  }
+  return 500;
 }

@@ -45,12 +45,14 @@ export interface GenerateTextInput {
   system: string;
   user: string;
   temperature?: number;
+  signal?: AbortSignal;
 }
 
 export interface GenerateChatInput {
   messages: LlmChatMessage[];
   tools?: LlmToolDefinition[];
   temperature?: number;
+  signal?: AbortSignal;
 }
 
 /** 文本生成结果包含模型来源，方便前端 trace 展示当前是否走 Mock。 */
@@ -60,6 +62,7 @@ export interface GenerateTextResult {
   model: string;
   isMock: boolean;
   tokenUsage: LlmTokenUsage;
+  fallback?: LlmFallbackInfo;
 }
 
 export interface GenerateChatResult {
@@ -71,6 +74,14 @@ export interface GenerateChatResult {
   model: string;
   isMock: boolean;
   tokenUsage: LlmTokenUsage;
+  fallback?: LlmFallbackInfo;
+}
+
+/** 真实 Provider 失败后降级到 Mock 时保留原始来源，便于 Trace 和评测识别。 */
+export interface LlmFallbackInfo {
+  provider: LlmProvider;
+  model: string;
+  reason: string;
 }
 
 /** 最终结论 Prompt 的上下文入参，由 executor 汇总工具结果后传入。 */

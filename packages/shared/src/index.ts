@@ -12,6 +12,7 @@ export interface LlmTokenUsage {
 export interface AgentRunMetrics {
   llmCallCount: number;
   toolCallCount: number;
+  fallbackCount: number;
   modelNames: string[];
   tokenUsage: LlmTokenUsage;
 }
@@ -67,6 +68,11 @@ export interface AgentStep {
   toolName?: string;
   modelName?: string;
   tokenUsage?: LlmTokenUsage;
+  fallback?: {
+    provider: string;
+    model: string;
+    reason: string;
+  };
   status?: "running" | "completed" | "failed" | "cancelled";
   approvalRequest?: ApprovalRequest;
 }

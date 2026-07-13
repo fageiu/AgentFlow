@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { AgentStep } from "@agentflow/shared";
 
 test("人工拒绝退款审批后不产生任何业务副作用", async () => {
   const testDataDir = join(process.cwd(), ".agentflow-test-data");
@@ -101,5 +102,422 @@ test("退款待审批期间禁止把工单关闭", async () => {
     assert.equal(getSandboxState().tickets.find((ticket) => ticket.id === "T-1001")?.status, "open");
   } finally {
     resetSandboxState();
+  }
+});
+
+test("run 启动后立即取消应停止后续步骤并保存 cancelled 快照", async () => {
+  const testDataDir = join(process.cwd(), ".agentflow-test-data");
+
+  process.env.LLM_MOCK = "true";
+  process.env.AGENTFLOW_DATA_DIR = testDataDir;
+  rmSync(testDataDir, { force: true, recursive: true });
+
+  const { cancelAgentRun } = await import("./cancelRun.js");
+  const { streamAgentTask } = await import("./executor.js");
+  const { clearRuns, getRun } = await import("../trace/runStore.js");
+  const { getSandboxState, resetSandboxState } = await import("../tools/sandboxTools.js");
+
+  resetSandboxState();
+
+  try {
+    const before = structuredClone(getSandboxState());
+    const stream = streamAgentTask("处理工单 T-1001：判断退款条件，必要时创建退款并更新工单状态。");
+    const started = await stream.next();
+
+    assert.equal(started.value?.kind, "run_started");
+    if (!started.value || started.value.kind !== "run_started") {
+      throw new Error("流式执行必须先返回 run_started");
+    }
+
+    const cancelled = cancelAgentRun(started.value.run.id, "测试立即取消");
+    assert.equal(cancelled.status, "accepted");
+
+    const result = await stream.next();
+    assert.equal(result.value?.kind, "run_cancelled");
+    if (!result.value || result.value.kind !== "run_cancelled") {
+      throw new Error("取消后必须返回 run_cancelled");
+    }
+
+    assert.equal(result.value.run.status, "cancelled");
+    assert.equal(result.value.run.steps.length, 0, "立即取消后不应继续生成计划或调用工具");
+    assert.equal(getRun(result.value.run.id)?.status, "cancelled");
+    assert.deepEqual(getSandboxState(), before, "立即取消不得产生业务副作用");
+  } finally {
+    resetSandboxState();
+    clearRuns();
+    rmSync(testDataDir, { force: true, recursive: true });
+  }
+});
+
+test("等待审批时取消应拒绝审批、保持零副作用并结束 run", async () => {
+  const testDataDir = join(process.cwd(), ".agentflow-test-data");
+
+  process.env.LLM_MOCK = "true";
+  process.env.AGENTFLOW_DATA_DIR = testDataDir;
+  rmSync(testDataDir, { force: true, recursive: true });
+
+  const { cancelAgentRun } = await import("./cancelRun.js");
+  const { streamAgentTask } = await import("./executor.js");
+  const { clearRuns } = await import("../trace/runStore.js");
+  const { getSandboxState, resetSandboxState } = await import("../tools/sandboxTools.js");
+
+  resetSandboxState();
+
+  try {
+    const before = structuredClone(getSandboxState());
+    const stream = streamAgentTask("处理工单 T-1001：判断退款条件，必要时创建退款并更新工单状态。");
+    let event = (await stream.next()).value;
+
+    while (event && event.kind !== "approval_required") {
+      event = (await stream.next()).value;
+    }
+
+    assert.ok(event && event.kind === "approval_required", "退款工具执行前必须进入人工审批");
+    if (!event || event.kind !== "approval_required") {
+      throw new Error("未进入预期的审批状态");
+    }
+
+    const cancellation = cancelAgentRun(event.run.id, "审批期间取消");
+    assert.equal(cancellation.status, "accepted");
+    if (cancellation.status === "accepted") {
+      assert.equal(cancellation.approvalResolved, true, "取消应唤醒等待中的审批 Promise");
+    }
+
+    const cancelledEvent = await stream.next();
+    assert.equal(cancelledEvent.value?.kind, "run_cancelled");
+    if (!cancelledEvent.value || cancelledEvent.value.kind !== "run_cancelled") {
+      throw new Error("审批期间取消后必须返回 run_cancelled");
+    }
+
+    const approvalStep = cancelledEvent.value.run.steps.find((step: AgentStep) => step.type === "approval");
+    assert.equal(approvalStep?.status, "cancelled");
+    assert.equal(approvalStep?.approvalRequest?.status, "rejected");
+    assert.equal(approvalStep?.approvalRequest?.reason, "审批期间取消");
+    assert.deepEqual(getSandboxState(), before, "审批期间取消不得执行高风险工具或产生业务副作用");
+  } finally {
+    resetSandboxState();
+    clearRuns();
+    rmSync(testDataDir, { force: true, recursive: true });
+  }
+});
+
+test("取消服务应校验 run 生命周期并保持重复请求幂等", async () => {
+  const testDataDir = join(process.cwd(), ".agentflow-test-data");
+
+  process.env.AGENTFLOW_DATA_DIR = testDataDir;
+  rmSync(testDataDir, { force: true, recursive: true });
+
+  const { cancelAgentRun } = await import("./cancelRun.js");
+  const { clearRunCancel, getRunCancel, registerRunControl } = await import("./runControl.js");
+  const { clearRuns, saveRun } = await import("../trace/runStore.js");
+
+  const createStoredRun = (id: string, status: "running" | "completed" | "cancelled") => ({
+    id,
+    task: "取消状态测试",
+    status,
+    steps: [],
+    createdAt: new Date().toISOString(),
+  });
+
+  try {
+    assert.equal(cancelAgentRun("run-not-found").status, "not_found");
+    assert.equal(getRunCancel("run-not-found"), undefined, "不存在的 run 不得遗留取消标记");
+
+    saveRun(createStoredRun("run-completed", "completed"));
+    assert.equal(cancelAgentRun("run-completed").status, "not_cancellable");
+    assert.equal(getRunCancel("run-completed"), undefined, "已完成 run 不得写入取消标记");
+
+    saveRun(createStoredRun("run-cancelled", "cancelled"));
+    assert.equal(cancelAgentRun("run-cancelled").status, "already_cancelled");
+
+    saveRun(createStoredRun("run-active", "running"));
+    const signal = registerRunControl("run-active");
+    const first = cancelAgentRun("run-active", "第一次取消");
+    const second = cancelAgentRun("run-active", "第二次取消");
+
+    assert.equal(signal.aborted, true, "取消活跃 run 时必须同步触发 AbortSignal");
+    assert.equal(first.status, "accepted");
+    assert.equal(second.status, "accepted");
+    if (first.status === "accepted" && second.status === "accepted") {
+      assert.deepEqual(second.cancellation, first.cancellation, "重复取消必须复用第一次取消结果");
+    }
+  } finally {
+    clearRunCancel("run-active");
+    clearRuns();
+    rmSync(testDataDir, { force: true, recursive: true });
+  }
+});
+
+test("工具调用循环超限应归类为执行器保护错误", async () => {
+  const { normalizeAgentError } = await import("./errors.js");
+  const error = normalizeAgentError(new Error("LLM tool calling loop exceeded 10 turns."));
+
+  assert.equal(error.code, "AGENT_LOOP_LIMIT_EXCEEDED");
+  assert.equal(error.category, "system");
+  assert.equal(error.retryable, true);
+});
+
+test("类型化错误应保留稳定错误码并合并执行上下文", async () => {
+  const {
+    BusinessDataNotFoundError,
+    LlmResponseFormatError,
+    getAgentErrorHttpStatus,
+    normalizeAgentError,
+  } = await import("./errors.js");
+  const businessError = normalizeAgentError(new BusinessDataNotFoundError("Ticket", "T-9999"), {
+    phase: "tool_call",
+  });
+  const responseError = normalizeAgentError(new LlmResponseFormatError("LLM response is not valid JSON."));
+
+  assert.equal(businessError.code, "BUSINESS_DATA_NOT_FOUND");
+  assert.equal(businessError.details?.entity, "Ticket");
+  assert.equal(businessError.details?.phase, "tool_call");
+  assert.equal(responseError.code, "LLM_RESPONSE_FORMAT_ERROR");
+  assert.equal(responseError.category, "llm");
+  assert.equal(getAgentErrorHttpStatus(businessError), 404);
+  assert.equal(getAgentErrorHttpStatus(responseError), 502);
+});
+
+test("Provider 应对 5xx 有限重试并在恢复后返回真实结果", async () => {
+  const originalFetch = globalThis.fetch;
+  const envKeys = [
+    "LLM_MOCK",
+    "LLM_PROVIDER",
+    "LLM_API_KEY",
+    "LLM_BASE_URL",
+    "LLM_FALLBACK_ON_ERROR",
+    "LLM_MAX_RETRIES",
+    "LLM_REQUEST_TIMEOUT_MS",
+  ] as const;
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  let attempts = 0;
+
+  process.env.LLM_MOCK = "false";
+  process.env.LLM_PROVIDER = "openai-compatible";
+  process.env.LLM_API_KEY = "test-key";
+  process.env.LLM_BASE_URL = "https://provider.test/v1";
+  process.env.LLM_FALLBACK_ON_ERROR = "false";
+  process.env.LLM_MAX_RETRIES = "2";
+  process.env.LLM_REQUEST_TIMEOUT_MS = "1000";
+  globalThis.fetch = async () => {
+    attempts += 1;
+    if (attempts < 3) {
+      return new Response("temporary unavailable", {
+        status: 503,
+        headers: { "Retry-After": "0" },
+      });
+    }
+
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: "provider recovered" } }],
+      usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+
+  try {
+    const { generateText } = await import("../llm/provider.js");
+    const result = await generateText({ system: "test", user: "test" });
+
+    assert.equal(attempts, 3);
+    assert.equal(result.text, "provider recovered");
+    assert.equal(result.isMock, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      const value = originalEnv[key];
+      if (value == null) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
+
+test("Provider 超时应产生稳定错误码，fallback 应显式保留降级来源", async () => {
+  const originalFetch = globalThis.fetch;
+  const envKeys = [
+    "LLM_MOCK",
+    "LLM_PROVIDER",
+    "LLM_API_KEY",
+    "LLM_BASE_URL",
+    "LLM_FALLBACK_ON_ERROR",
+    "LLM_MAX_RETRIES",
+    "LLM_REQUEST_TIMEOUT_MS",
+  ] as const;
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+
+  process.env.LLM_MOCK = "false";
+  process.env.LLM_PROVIDER = "openai-compatible";
+  process.env.LLM_API_KEY = "test-key";
+  process.env.LLM_BASE_URL = "https://provider.test/v1";
+  process.env.LLM_MAX_RETRIES = "0";
+  process.env.LLM_REQUEST_TIMEOUT_MS = "10";
+  globalThis.fetch = async (_input, init) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+  });
+
+  try {
+    const { normalizeAgentError } = await import("./errors.js");
+    const { generateText } = await import("../llm/provider.js");
+    process.env.LLM_FALLBACK_ON_ERROR = "false";
+    let timeoutError: unknown;
+
+    try {
+      await generateText({ system: "test", user: "test" });
+    } catch (error) {
+      timeoutError = error;
+    }
+
+    assert.equal(normalizeAgentError(timeoutError).code, "LLM_TIMEOUT");
+
+    process.env.LLM_FALLBACK_ON_ERROR = "true";
+    const fallback = await generateText({ system: "test", user: "test" });
+    assert.equal(fallback.isMock, true);
+    assert.equal(fallback.fallback?.provider, "openai-compatible");
+    assert.equal(fallback.fallback?.model.length ? true : false, true);
+    assert.ok(/timed out/i.test(fallback.fallback?.reason ?? ""));
+    assert.ok(!fallback.text.includes("[Mock fallback"), "结构化输出不得混入 fallback 调试文本");
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      const value = originalEnv[key];
+      if (value == null) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
+
+test("退款创建后续写入失败时应回滚部分业务副作用", async () => {
+  const testDataDir = join(process.cwd(), ".agentflow-test-data");
+
+  process.env.LLM_MOCK = "true";
+  process.env.AGENTFLOW_DATA_DIR = testDataDir;
+  rmSync(testDataDir, { force: true, recursive: true });
+
+  const { runAgentTask } = await import("./executor.js");
+  const { clearRuns } = await import("../trace/runStore.js");
+  const { toolRegistry } = await import("../tools/toolRegistry.js");
+  const { getSandboxState, resetSandboxState } = await import("../tools/sandboxTools.js");
+  const originalUpdateTicketStatus = toolRegistry.updateTicketStatus.execute;
+
+  resetSandboxState();
+  toolRegistry.updateTicketStatus.execute = () => {
+    throw new Error("Injected updateTicketStatus failure.");
+  };
+
+  try {
+    let thrown: unknown;
+    try {
+      await runAgentTask("处理工单 T-1001：判断退款条件，必要时创建退款并更新工单状态。");
+    } catch (error) {
+      thrown = error;
+    }
+
+    const state = getSandboxState();
+    assert.ok(thrown instanceof Error, "后续状态写入失败时 run 必须失败");
+    assert.equal(state.refunds.length, 0, "回滚后不得残留已创建退款");
+    assert.equal(state.orders.find((order) => order.id === "O-7001")?.refundStatus, "none");
+    assert.equal(state.tickets.find((ticket) => ticket.id === "T-1001")?.status, "open");
+  } finally {
+    toolRegistry.updateTicketStatus.execute = originalUpdateTicketStatus;
+    resetSandboxState();
+    clearRuns();
+    rmSync(testDataDir, { force: true, recursive: true });
+  }
+});
+
+test("模型返回非法 JSON 时应归类为响应格式错误", async () => {
+  const originalFetch = globalThis.fetch;
+  const envKeys = [
+    "LLM_MOCK",
+    "LLM_PROVIDER",
+    "LLM_API_KEY",
+    "LLM_BASE_URL",
+    "LLM_FALLBACK_ON_ERROR",
+    "LLM_MAX_RETRIES",
+  ] as const;
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+
+  process.env.LLM_MOCK = "false";
+  process.env.LLM_PROVIDER = "openai-compatible";
+  process.env.LLM_API_KEY = "test-key";
+  process.env.LLM_BASE_URL = "https://provider.test/v1";
+  process.env.LLM_FALLBACK_ON_ERROR = "false";
+  process.env.LLM_MAX_RETRIES = "0";
+  globalThis.fetch = async () => new Response("not-json", { status: 200 });
+
+  try {
+    const { normalizeAgentError } = await import("./errors.js");
+    const { generateText } = await import("../llm/provider.js");
+    let thrown: unknown;
+
+    try {
+      await generateText({ system: "test", user: "test" });
+    } catch (error) {
+      thrown = error;
+    }
+
+    assert.equal(normalizeAgentError(thrown).code, "LLM_RESPONSE_FORMAT_ERROR");
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      const value = originalEnv[key];
+      if (value == null) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
+
+test("工具参数缺失时应返回可诊断的校验错误", async () => {
+  const { normalizeAgentError } = await import("./errors.js");
+  const { runTool } = await import("../tools/toolRegistry.js");
+  let thrown: unknown;
+
+  try {
+    runTool("createRefund", { orderId: "O-7001" });
+  } catch (error) {
+    thrown = error;
+  }
+
+  const normalized = normalizeAgentError(thrown, { phase: "fault_injection" });
+  assert.equal(normalized.code, "TOOL_INPUT_VALIDATION_ERROR");
+  assert.equal(normalized.category, "tool");
+  assert.ok(Array.isArray(normalized.details?.issues));
+});
+
+test("持久化目录不可写时应进入降级并返回结构化错误", async () => {
+  const testDataDir = join(process.cwd(), ".agentflow-test-data");
+  const { normalizeAgentError } = await import("./errors.js");
+  const { getPersistenceHealth, writePersistentState } = await import("../storage/persistentState.js");
+
+  rmSync(testDataDir, { force: true, recursive: true });
+  // 用普通文件占据数据目录路径，稳定模拟 mkdir/write 失败，无需修改真实目录权限。
+  writeFileSync(testDataDir, "blocked", "utf8");
+
+  try {
+    let thrown: unknown;
+    try {
+      writePersistentState({
+        version: 1,
+        conversations: [],
+        runs: [],
+        pendingApprovals: [],
+        evaluationRuns: [],
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    assert.equal(normalizeAgentError(thrown).code, "STORAGE_WRITE_ERROR");
+    assert.equal(getPersistenceHealth().degraded, true);
+  } finally {
+    rmSync(testDataDir, { force: true, recursive: true });
   }
 });

@@ -3,9 +3,9 @@ import Fastify from "fastify";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AgentRunEvent, ConversationMessage } from "@agentflow/shared";
 import { getPendingApprovalByRun, resolveApprovalForRun } from "./approval/approvalStore.js";
-import { normalizeAgentError } from "./agent/errors.js";
+import { getAgentErrorHttpStatus, normalizeAgentError } from "./agent/errors.js";
 import { runAgentTask, streamAgentTask } from "./agent/executor.js";
-import { requestRunCancel } from "./agent/runControl.js";
+import { cancelAgentRun } from "./agent/cancelRun.js";
 import {
   clearConversations,
   createConversation,
@@ -20,6 +20,7 @@ import { runEvaluationSuite } from "./eval/evaluationRunner.js";
 import { clearEvaluationRuns, getEvaluationRun, listEvaluationRuns } from "./eval/evaluationStore.js";
 import { clearRuns, getRun, listRuns } from "./trace/runStore.js";
 import { getSandboxState, resetSandboxState } from "./tools/sandboxTools.js";
+import { getPersistenceHealth } from "./storage/persistentState.js";
 
 /** 普通执行接口的请求体，主要用于非流式调试。 */
 interface RunAgentBody {
@@ -67,12 +68,26 @@ interface EvaluationRunParams {
 
 const app = Fastify({ logger: true });
 
+/** 所有非 SSE 路由统一返回结构化错误，避免 Fastify 默认响应泄露内部异常文本。 */
+app.setErrorHandler((error, request, reply) => {
+  const agentError = normalizeAgentError(error, {
+    phase: "http_route",
+    method: request.method,
+    url: request.url,
+  });
+
+  return reply.code(getAgentErrorHttpStatus(agentError)).send({
+    message: agentError.userMessage,
+    error: agentError,
+  });
+});
+
 await app.register(cors, {
   origin: true,
 });
 
 /** 健康检查接口，用于确认后端服务是否已经启动。 */
-app.get("/health", async () => ({ ok: true }));
+app.get("/health", async () => ({ ok: true, persistence: getPersistenceHealth() }));
 
 /** 沙箱状态接口，前端用它展示 Agent 工具调用后的业务状态变化。 */
 app.get("/sandbox/state", async () => getSandboxState());
@@ -224,17 +239,35 @@ async function handleRejectRun(
 }
 
 /** 取消正在执行或等待审批的 run；若 run 卡在审批点，会先拒绝审批来唤醒 executor。 */
-async function handleCancelRun(request: FastifyRequest<{ Body: CancelRunBody; Params: RunHistoryParams }>) {
-  const cancellation = requestRunCancel(request.params.runId, request.body?.reason ?? "用户取消执行");
+async function handleCancelRun(
+  request: FastifyRequest<{ Body: CancelRunBody; Params: RunHistoryParams }>,
+  reply: FastifyReply,
+) {
+  const result = cancelAgentRun(request.params.runId, request.body?.reason ?? "用户取消执行");
 
-  resolveApprovalForRun(request.params.runId, {
-    status: "rejected",
-    reason: cancellation.reason,
-  });
+  if (result.status === "not_found") {
+    return reply.code(404).send({ message: "Agent run not found." });
+  }
+
+  if (result.status === "not_cancellable") {
+    return reply.code(409).send({
+      message: `Agent run is already ${result.run.status}.`,
+      status: result.run.status,
+    });
+  }
+
+  if (result.status === "already_cancelled") {
+    return {
+      ok: true,
+      alreadyCancelled: true,
+      status: result.run.status,
+    };
+  }
 
   return {
     ok: true,
-    cancellation,
+    cancellation: result.cancellation,
+    approvalResolved: result.approvalResolved,
   };
 }
 
@@ -309,7 +342,8 @@ function persistRunEventToConversation(conversationId: string, assistantMessageI
       run: event.run,
       status: event.run.status,
       steps: event.run.steps,
-      errorMessage: "本次执行已取消，可重试上一条任务。",
+      // 会话恢复后也必须保持取消与失败语义分离。
+      errorMessage: "",
     });
     return;
   }
@@ -377,12 +411,25 @@ async function handleRunAgentStream(
     "X-Accel-Buffering": "no",
   });
 
+  let activeRunId: string | undefined;
+  let streamFinished = false;
+  const handleClientDisconnect = () => {
+    if (!streamFinished && activeRunId) {
+      cancelAgentRun(activeRunId, "SSE 客户端连接已断开");
+    }
+  };
+  reply.raw.on("close", handleClientDisconnect);
+
   try {
     // 执行器是 async generator，每 yield 一次就立即推给浏览器。
     for await (const event of streamAgentTask(task)) {
+      if (event.kind === "run_started") {
+        activeRunId = event.run.id;
+      }
       persistRunEventToConversation(conversation.id, assistantMessage.id, event);
       writeSseEvent(reply, event);
     }
+    streamFinished = true;
   } catch (error) {
     const agentError = normalizeAgentError(error, {
       phase: "sse_route",
@@ -394,13 +441,19 @@ async function handleRunAgentStream(
       content: agentError.userMessage,
       errorMessage: agentError.userMessage,
     });
-    writeSseEvent(reply, {
-      kind: "error",
-      message: agentError.userMessage,
-      error: agentError,
-    });
+    if (!reply.raw.destroyed && !reply.raw.writableEnded) {
+      writeSseEvent(reply, {
+        kind: "error",
+        message: agentError.userMessage,
+        error: agentError,
+      });
+    }
   } finally {
-    reply.raw.end();
+    streamFinished = true;
+    reply.raw.off("close", handleClientDisconnect);
+    if (!reply.raw.writableEnded) {
+      reply.raw.end();
+    }
   }
 }
 
