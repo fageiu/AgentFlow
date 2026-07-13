@@ -33,6 +33,24 @@ export interface AgentPlan {
   steps: AgentPlanStep[];
 }
 
+/** 服务端根据可信执行轨迹派生的业务结论，不依赖模型自然语言措辞。 */
+export type AgentOutcomeDecision =
+  | "read_only"
+  | "no_refund"
+  | "refund_required"
+  | "already_satisfied"
+  | "waiting_approval"
+  | "manual_review"
+  | "failed"
+  | "cancelled";
+
+export interface AgentOutcome {
+  decision: AgentOutcomeDecision;
+  performedActions: string[];
+  evidence: string[];
+  userMessage: string;
+}
+
 export interface AgentErrorInfo {
   code: string;
   category: "business" | "tool" | "llm" | "system";
@@ -88,6 +106,8 @@ export interface AgentRun {
   completedAt?: string;
   metrics?: AgentRunMetrics;
   error?: AgentErrorInfo;
+  /** 旧版持久化 Run 可以没有 outcome；新 Run 在进入可审计状态时由服务端写入。 */
+  outcome?: AgentOutcome;
 }
 
 /** 历史运行列表使用的轻量摘要，避免列表接口一次性传回完整 trace 明细。 */
@@ -261,6 +281,7 @@ export interface EvaluationExpectations {
   runStatus?: AgentRun["status"];
   errorMessageIncludes?: string[];
   errorCode?: string;
+  outcomeDecision?: AgentOutcomeDecision;
   finalMessageIncludes?: string[];
   /** 最终回复至少命中其中一个等价短语，避免确定性 Judge 因同义表达产生假阴性。 */
   finalMessageIncludesAny?: string[];
@@ -321,6 +342,7 @@ export interface EvaluationCaseResult {
   tokenUsage: LlmTokenUsage;
   modelNames: string[];
   approvalRequired: boolean;
+  outcomeDecision?: AgentOutcomeDecision;
   previousStatus?: EvaluationCaseStatus;
   regressionStatus: EvaluationRegressionStatus;
   errorMessage?: string;

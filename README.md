@@ -11,6 +11,7 @@ AgentFlow 是一个面向企业流程自动化的 AI Agent Runtime 与 Evaluatio
 - **Human-in-the-loop**：`riskLevel: "high"` 的退款工具必须等待人工批准；拒绝后不创建退款，也不继续更新工单状态。
 - **可观测与可恢复**：通过 SSE 展示执行时间线，持久化 AgentRun、会话和审批快照，并将服务重启时无法继续的任务降级为可重试中断状态。
 - **确定性 Agent 评测**：内置 18 条 golden task，覆盖查询、知识检索、退款、审批边界、异常安全和幂等性；同时断言最终回答、工具轨迹与业务副作用。
+- **结构化业务 Outcome**：服务端根据真实工具轨迹和审批决议派生 `decision`、实际写入动作与证据引用，自然语言措辞变化不再影响核心业务判定。
 - **模型层解耦**：统一封装 OpenAI-compatible Provider，支持兼容模型切换和 Mock fallback，便于本地演示与稳定回归。
 
 完整设计见 [Agent 执行架构](docs/architecture.md)。

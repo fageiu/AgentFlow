@@ -201,6 +201,19 @@ export function scoreEvaluationCase(input: {
     );
   }
 
+  if (expectations.outcomeDecision) {
+    assertions.push(
+      createAssertion(
+        "outcome-decision",
+        "结构化业务结论符合预期",
+        input.run?.outcome?.decision === expectations.outcomeDecision,
+        expectations.outcomeDecision,
+        input.run?.outcome?.decision ?? "missing-outcome",
+        `评测根据可信工具轨迹要求 outcome.decision 为 ${expectations.outcomeDecision}，当前为 ${input.run?.outcome?.decision ?? "missing-outcome"}。`,
+      ),
+    );
+  }
+
   for (const expectedText of expectations.finalMessageIncludes ?? []) {
     assertions.push(
       createAssertion(
@@ -335,6 +348,7 @@ export function scoreEvaluationCase(input: {
     tokenUsage: input.run?.metrics?.tokenUsage ?? createEmptyTokenUsage(),
     modelNames: input.run?.metrics?.modelNames ?? [],
     approvalRequired: hasApprovalStep(input.run),
+    outcomeDecision: input.run?.outcome?.decision,
     previousStatus: input.previousStatus,
     regressionStatus: "new",
     errorMessage: input.errorMessage,

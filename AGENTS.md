@@ -21,6 +21,7 @@
 - Week 7 起，`apps/web/src/App.vue` 采用单会话多轮消息流；每条用户消息对应一个 Agent run，trace 嵌在对应 assistant 消息下。
 - `apps/server/src/main.ts`：Fastify 路由、SSE 响应流、审批接口。
 - `apps/server/src/agent/executor.ts`：Agent 执行流程、步骤事件生成、Tool Calling 循环和审批暂停/恢复。
+- `apps/server/src/agent/outcome.ts`：根据 Run 终态、审批决议和真实工具轨迹派生结构化业务结论，禁止信任模型自报动作。
 - `apps/server/src/agent/errors.ts`：Agent 统一错误模型，负责错误分类、用户提示、结构化错误码和 SSE error payload。
 - `apps/server/src/agent/runControl.ts`：AgentRun 取消请求的进程内控制状态，executor 在步骤边界读取它来停止执行。
 - `apps/server/src/agent/cancelRun.ts`：取消生命周期校验与审批唤醒编排，负责区分不存在、已结束、已取消和可取消 run。
@@ -71,6 +72,7 @@
 - 取消执行通过 `runControl.ts` 记录 run 级别取消标记，`executor.ts` 负责把取消转换为 `cancelled` 状态和 `run_cancelled` SSE 事件，路由层不直接改写执行流程。
 - Week 10 起，`runStore`、`conversationStore` 和 `approvalStore` 的内存 Map 会同步写入本地 JSON；重启后无法继续的 `running`/`waiting_approval` run 必须降级为可重试的中断状态。
 - Agent 错误必须经过 `errors.ts` 归一化；工具失败、业务数据不存在、模型异常和系统异常都应写入 failed trace，并在 run 快照中保存结构化 `error`。
+- 新 Run 进入 completed、failed、cancelled 或 waiting_approval 时必须写入结构化 `outcome`；`decision` 与 `performedActions` 只能由服务端可信轨迹派生，`userMessage` 才允许来自模型自然语言。
 
 ## Evaluation 约定
 
@@ -88,5 +90,6 @@
 - provider 如果拿不到真实 usage，应为 Mock/fallback 提供估算 token，保证本地 Demo 的评测看板不缺指标。
 - 每次评测 run 需要保存 provider、model、promptVersion 和 mock/real 模式，便于对比不同模型或 Prompt 配置效果。
 - 真实 Provider 评测中只要触发 Mock fallback，该 case 不得判定为通过。
+- 业务结论优先断言 `outcomeDecision`、工具轨迹和沙箱副作用；自然语言包含断言只用于稳定实体或展示完整性，不应用固定措辞代替业务语义。
 - CI 质量门禁统一执行测试、类型检查、构建和完整 Mock Golden Task；任一评测失败或异常都必须使流水线失败。
 - CI 生成的评测 Markdown/JSON 保存到 `.agentflow-artifacts/` 并作为流水线产物上传，不提交到 Git。

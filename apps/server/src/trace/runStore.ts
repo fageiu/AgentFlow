@@ -1,5 +1,6 @@
 import type { AgentRun, AgentRunSummary } from "@agentflow/shared";
 import { readPersistentState, writePersistentState } from "../storage/persistentState.js";
+import { deriveAgentOutcome } from "../agent/outcome.js";
 
 const runs = new Map<string, AgentRun>();
 
@@ -26,7 +27,7 @@ function normalizeRecoveredRun(run: AgentRun): AgentRun {
     return cloneRun(run);
   }
 
-  return {
+  const recoveredRun: AgentRun = {
     ...cloneRun(run),
     status: "failed",
     completedAt: run.completedAt ?? new Date().toISOString(),
@@ -35,6 +36,9 @@ function normalizeRecoveredRun(run: AgentRun): AgentRun {
       status: step.status === "running" ? "failed" : step.status,
     })),
   };
+
+  recoveredRun.outcome = deriveAgentOutcome(recoveredRun);
+  return recoveredRun;
 }
 
 /** 保存一次 Agent 运行记录，并立即写入本地持久化快照。 */

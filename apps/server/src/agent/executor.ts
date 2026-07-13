@@ -47,6 +47,7 @@ import {
   registerRunControl,
   throwIfRunCancelled,
 } from "./runControl.js";
+import { deriveAgentOutcome } from "./outcome.js";
 
 const STEP_DELAY_MS = 250;
 const MAX_TOOL_LOOP_TURNS = 10;
@@ -413,6 +414,7 @@ async function failRun(run: AgentRun, error: unknown) {
   run.status = "failed";
   run.completedAt = new Date().toISOString();
   run.error = agentError;
+  run.outcome = deriveAgentOutcome(run);
   saveRun(run);
   clearRunCancel(run.id);
   return agentError;
@@ -934,6 +936,7 @@ async function* requestApprovalForTool(
 
   run.status = "waiting_approval";
   run.steps.push(approvalStep);
+  run.outcome = deriveAgentOutcome(run);
   saveRun(run);
 
   yield {
@@ -973,6 +976,8 @@ async function* requestApprovalForTool(
   throwIfRunCancelled(run);
 
   run.status = "running";
+  // 审批等待结论已经失效，最终 Outcome 会在新的终态重新派生。
+  run.outcome = undefined;
   saveRun(run);
 
   yield {
@@ -1308,6 +1313,7 @@ export async function runAgentTask(task: string, approvalMode: "approve" | "reje
     throwIfRunCancelled(run);
     run.status = "completed";
     run.completedAt = new Date().toISOString();
+    run.outcome = deriveAgentOutcome(run);
     saveRun(run);
     clearRunCancel(run.id);
     return run;
@@ -1316,6 +1322,7 @@ export async function runAgentTask(task: string, approvalMode: "approve" | "reje
     if (error instanceof AgentRunCancelledError) {
       run.status = "cancelled";
       run.completedAt = new Date().toISOString();
+      run.outcome = deriveAgentOutcome(run);
       saveRun(run);
       clearRunCancel(run.id);
       return run;
@@ -1352,6 +1359,7 @@ export async function* streamAgentTask(task: string): AsyncGenerator<AgentRunEve
     throwIfRunCancelled(run);
     run.status = "completed";
     run.completedAt = new Date().toISOString();
+    run.outcome = deriveAgentOutcome(run);
     saveRun(run);
     clearRunCancel(run.id);
 
@@ -1364,6 +1372,7 @@ export async function* streamAgentTask(task: string): AsyncGenerator<AgentRunEve
     if (error instanceof AgentRunCancelledError) {
       run.status = "cancelled";
       run.completedAt = new Date().toISOString();
+      run.outcome = deriveAgentOutcome(run);
       saveRun(run);
       clearRunCancel(run.id);
 

@@ -131,3 +131,10 @@
 - Evaluation failures and execution errors return a non-zero exit code, preventing regressed changes from passing the gate.
 - CI publishes the generated Markdown summary and retains Markdown/JSON evaluation reports as downloadable artifacts.
 - Real-model evaluation remains a separately authorized release check so pull requests do not incur API costs.
+
+## Week 15.1
+
+- Agent runs persist a structured Outcome containing a server-derived decision, performed write actions, evidence references, and the model-authored user message.
+- Outcome decisions are derived from trusted run status, approval resolution, and executed tool trace rather than natural-language claims.
+- Deterministic evaluation supports `outcomeDecision` assertions, preventing semantically correct model wording changes from creating false regressions.
+- Legacy persisted runs remain readable without an Outcome; interrupted runs recovered after restart receive a failed Outcome.
