@@ -708,8 +708,11 @@ async function buildReplanStep(
   };
 }
 
-/** 校验 Planner 输出，防止模型把未注册工具或不可执行结构交给 Executor。 */
-function parseAgentPlan(raw: string, allowEmpty = false): AgentPlan {
+/**
+ * 校验并归一 Planner 输出。工具授权是执行安全边界，展示字段缺失则使用服务端默认值。
+ * 无法映射到单个已注册工具的步骤不会进入 Executor，避免模型格式波动中断整条任务。
+ */
+export function parseAgentPlan(raw: string, allowEmpty = false): AgentPlan {
   let value: unknown;
 
   try {
@@ -729,28 +732,34 @@ function parseAgentPlan(raw: string, allowEmpty = false): AgentPlan {
   }
 
   const stepIds = new Set<string>();
-  const steps = candidate.steps.map((step, index) => {
-    if (!step || typeof step !== "object" || typeof step.id !== "string" || typeof step.title !== "string"
-      || typeof step.objective !== "string" || !Array.isArray(step.allowedTools) || step.allowedTools.length !== 1
-      || typeof step.allowedTools[0] !== "string" || !isAgentToolName(step.allowedTools[0])) {
-      throw new Error(`Planner step ${index + 1} is invalid.`);
-    }
+  const steps: AgentPlanStep[] = [];
 
-    if (stepIds.has(step.id)) {
-      throw new Error(`Planner step id is duplicated: ${step.id}`);
+  for (const [index, step] of candidate.steps.entries()) {
+    if (!step || typeof step !== "object" || !Array.isArray(step.allowedTools) || step.allowedTools.length !== 1
+      || typeof step.allowedTools[0] !== "string" || !isAgentToolName(step.allowedTools[0])) {
+      continue;
     }
-    stepIds.add(step.id);
 
     const toolName = step.allowedTools[0];
-    return {
-      id: step.id,
-      title: step.title,
-      objective: step.objective,
+    const baseId = typeof step.id === "string" && step.id.trim() ? step.id.trim() : `plan-step-${index + 1}`;
+    const id = stepIds.has(baseId) ? `${baseId}-${index + 1}` : baseId;
+    stepIds.add(id);
+
+    steps.push({
+      id,
+      title: typeof step.title === "string" && step.title.trim() ? step.title.trim() : `执行 ${toolName}`,
+      objective: typeof step.objective === "string" && step.objective.trim()
+        ? step.objective.trim()
+        : `调用 ${toolName} 获取完成任务所需的真实信息。`,
       allowedTools: [toolName],
       // 审批属性由服务端工具风险等级决定，不能信任模型返回的布尔值。
       requiresApproval: toolRegistry[toolName].riskLevel === "high",
-    } satisfies AgentPlanStep;
-  });
+    } satisfies AgentPlanStep);
+  }
+
+  if (!allowEmpty && steps.length === 0) {
+    throw new Error("Planner plan has no executable tool step.");
+  }
 
   return { version: 1, summary: candidate.summary, steps };
 }
