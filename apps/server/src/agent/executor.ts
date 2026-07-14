@@ -1052,8 +1052,8 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
       }
     }
 
+    // 计划已耗尽时且无恢复锁，主动收敛总结，避免模型在无授权步骤时重复调用最后一个工具。
     if (!activePlanStep && actionDecisionCompleted && !pendingRecovery) {
-      // 计划已耗尽时由 Executor 主动收敛，避免模型在无授权步骤时重复调用最后一个工具。
       const finalStep = await buildFinalConclusionStep(
         run,
         stepIndex++,
@@ -1081,6 +1081,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
       toolCalls,
     });
 
+    // llm调用工具
     if (toolCalls.length > 0) {
       if (toolCalls.length > 1) {
         throw new Error("Executor accepts one tool call per planned step.");
@@ -1106,6 +1107,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
           }
 
           const tool = toolRegistry[toolCall.name];
+          // 高风险工具调用需要人工审批，批准后才执行，拒绝时把拒绝结果回传给 LLM。
           if (tool.riskLevel === "high") {
             const rejectedToolMessage = yield* requestApprovalForTool(run, stepIndex++, toolCall, mode);
 
@@ -1171,6 +1173,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
           });
           yield addStep(run, failedToolStep.step);
 
+          // 可重试 → 结构化错误回传 LLM → 重规划
           if (retryDecision.retryable) {
             retryAttemptsByTool.set(toolCall.name, nextRetryAttempt);
             // OpenAI-compatible 协议要求 assistant.tool_calls 后立即存在同 ID 的 tool message。
@@ -1201,6 +1204,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
               content: `Planner 已根据工具观察更新剩余步骤：${JSON.stringify(replanned.plan)}`,
             });
             yield addStep(run, replanned.step);
+            // 加锁：待恢复，工具调用失败需重试，不允许生成最终结论
             pendingRecovery = {
               toolName: toolCall.name,
               retryAttempt: nextRetryAttempt,
@@ -1233,6 +1237,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
       continue;
     }
 
+    // 生成最终结论
     if (assistant.value.message.content) {
       throwIfRunCancelled(run);
       if (activePlanStep) {
@@ -1252,6 +1257,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
         );
         continue;
       }
+      // 存在恢复锁时，不允许直接生成结论
       if (pendingRecovery) {
         if (pendingRecovery.promptAttempts < MAX_TOOL_RETRY_ATTEMPTS) {
           pendingRecovery.promptAttempts += 1;
