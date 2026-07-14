@@ -5,6 +5,7 @@ import { buildStepErrorSummary } from "../utils/errors";
 import {
   getStepStatusLabel,
   getStepSummary,
+  parseStepDetail,
 } from "../utils/trace";
 
 const props = defineProps<{
@@ -25,6 +26,22 @@ const shouldShowSummary = computed(() => Boolean(errorSummary.value)
   || Boolean(props.step.fallback)
   || isPendingApproval.value
   || props.step.status !== "completed");
+const toolDetail = computed(() => {
+  if (props.step.type !== "tool_call") {
+    return undefined;
+  }
+  const data = parseStepDetail(props.step.detail).data;
+  return data ? {
+    input: data.input,
+    output: data.output,
+    riskLevel: typeof data.riskLevel === "string" ? data.riskLevel : undefined,
+  } : undefined;
+});
+
+function formatToolPayload(value: unknown) {
+  if (value == null) return "暂无";
+  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
 
 const statusMark = computed(() => {
   if (isPendingApproval.value) {
@@ -80,6 +97,31 @@ const approvalPreview = computed(() => {
       </div>
 
       <p v-if="shouldShowSummary" class="run-flow-step-summary">{{ summary }}</p>
+
+      <details v-if="toolDetail" class="plan-tool-detail standalone-tool-detail">
+        <summary>
+          <span>工具调用</span>
+          <small>{{ step.toolName }}<template v-if="step.durationMs != null"> · {{ step.durationMs }}ms</template></small>
+        </summary>
+        <dl class="plan-tool-meta">
+          <div>
+            <dt>工具</dt>
+            <dd>{{ step.toolName }}</dd>
+          </div>
+          <div v-if="toolDetail.riskLevel">
+            <dt>风险</dt>
+            <dd>{{ toolDetail.riskLevel }}</dd>
+          </div>
+        </dl>
+        <div class="plan-tool-payload">
+          <strong>输入</strong>
+          <pre>{{ formatToolPayload(toolDetail.input) }}</pre>
+        </div>
+        <div class="plan-tool-payload">
+          <strong>输出</strong>
+          <pre>{{ formatToolPayload(toolDetail.output) }}</pre>
+        </div>
+      </details>
 
       <p v-if="step.fallback" class="run-flow-fallback-notice">
         {{ step.fallback.provider }}/{{ step.fallback.model }} 调用失败，本步骤已使用 Mock 结果。

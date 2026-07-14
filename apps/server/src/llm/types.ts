@@ -83,14 +83,3 @@ export interface LlmFallbackInfo {
   model: string;
   reason: string;
 }
-
-/** 最终结论 Prompt 的上下文入参，由 executor 汇总工具结果后传入。 */
-export interface FinalPromptInput {
-  task: string;
-  ticket: unknown;
-  customer: unknown;
-  order: unknown;
-  policy: unknown;
-  refund?: unknown;
-  ticketStatusUpdate?: unknown;
-}

@@ -577,6 +577,8 @@ async function buildPlanningTicketContextStep(run: AgentRun, index: number) {
 }
 
 const defaultPlanStepDefinitions = {
+  listTickets: ["list-tickets", "查询全部工单", "读取当前全部工单并整理用户要求的字段。", false],
+  searchTickets: ["search-tickets", "按条件筛选工单", "根据用户给定条件筛选匹配工单。", false],
   getTicket: ["read-ticket", "读取工单", "确认工单关联的客户、订单和诉求。", false],
   getCustomer: ["read-customer", "读取客户", "核查客户等级和风险信息。", false],
   getOrder: ["read-order", "读取订单", "核查订单金额、状态与退款状态。", false],
@@ -674,6 +676,7 @@ async function buildReplanStep(
       ...buildPlanPrompt(run.task, {
         completedTools: completedSteps.flatMap((step) => step.allowedTools),
         observation,
+        requiredFirstTool,
         ticketContext,
       }),
       temperature: 0.1,
@@ -712,11 +715,30 @@ async function buildReplanStep(
  * 校验并归一 Planner 输出。工具授权是执行安全边界，展示字段缺失则使用服务端默认值。
  * 无法映射到单个已注册工具的步骤不会进入 Executor，避免模型格式波动中断整条任务。
  */
+/** 兼容部分 OpenAI-compatible 模型在 JSON 外包裹代码块或极短说明。 */
+function parseStructuredJsonText(text: string) {
+  const withoutFence = text.trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+
+  try {
+    return JSON.parse(withoutFence) as unknown;
+  } catch {
+    const firstBrace = withoutFence.indexOf("{");
+    const lastBrace = withoutFence.lastIndexOf("}");
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      return JSON.parse(withoutFence.slice(firstBrace, lastBrace + 1)) as unknown;
+    }
+    throw new Error("LLM response does not contain a valid JSON object.");
+  }
+}
+
 export function parseAgentPlan(raw: string, allowEmpty = false): AgentPlan {
   let value: unknown;
 
   try {
-    value = JSON.parse(raw);
+    value = parseStructuredJsonText(raw);
   } catch {
     throw new Error("Planner did not return valid JSON.");
   }
@@ -741,16 +763,19 @@ export function parseAgentPlan(raw: string, allowEmpty = false): AgentPlan {
     }
 
     const toolName = step.allowedTools[0];
+    const defaultDefinition = defaultPlanStepDefinitions[toolName];
     const baseId = typeof step.id === "string" && step.id.trim() ? step.id.trim() : `plan-step-${index + 1}`;
     const id = stepIds.has(baseId) ? `${baseId}-${index + 1}` : baseId;
     stepIds.add(id);
 
     steps.push({
       id,
-      title: typeof step.title === "string" && step.title.trim() ? step.title.trim() : `执行 ${toolName}`,
+      title: typeof step.title === "string" && step.title.trim()
+        ? step.title.trim()
+        : defaultDefinition[1],
       objective: typeof step.objective === "string" && step.objective.trim()
         ? step.objective.trim()
-        : `调用 ${toolName} 获取完成任务所需的真实信息。`,
+        : defaultDefinition[2],
       allowedTools: [toolName],
       // 审批属性由服务端工具风险等级决定，不能信任模型返回的布尔值。
       requiresApproval: toolRegistry[toolName].riskLevel === "high",
@@ -810,6 +835,156 @@ function summarizeStepsForFinalPrompt(steps: AgentStep[]) {
     }));
 }
 
+const requiredConclusionLabels = ["工单需求", "处理结果", "处理依据", "下一步"] as const;
+
+function hasCompleteConclusion(value: string) {
+  const normalizedLines = value
+    .replace(/\s*(工单需求|处理结果|处理依据|下一步)[：:]/g, "\n$1：")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return requiredConclusionLabels.every((label) => {
+    const line = normalizedLines.find((item) => item.startsWith(`${label}：`));
+    return Boolean(line?.slice(line.indexOf("：") + 1).trim());
+  });
+}
+
+function getTrustedTicketRequirement(run: AgentRun) {
+  const ticketStep = run.steps.find(
+    (step) => step.toolName === "getTicket" && step.status === "completed",
+  );
+
+  if (!ticketStep) {
+    return run.task;
+  }
+
+  try {
+    const detail = JSON.parse(ticketStep.detail) as { output?: { id?: unknown; description?: unknown } };
+    const ticketId = typeof detail.output?.id === "string" ? detail.output.id : undefined;
+    const description = typeof detail.output?.description === "string" ? detail.output.description : undefined;
+    return description ? `${ticketId ? `${ticketId}：` : ""}${description}` : run.task;
+  } catch {
+    return run.task;
+  }
+}
+
+function getCompletedToolOutput(run: AgentRun, toolName: string) {
+  const step = [...run.steps].reverse().find(
+    (item) => item.toolName === toolName && item.status === "completed"
+      && item.title !== "等待人工审批：高风险工具调用",
+  );
+
+  if (!step) {
+    return undefined;
+  }
+
+  try {
+    const detail = JSON.parse(step.detail) as { output?: unknown };
+    return detail.output && typeof detail.output === "object" && !Array.isArray(detail.output)
+      ? detail.output as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readOutputText(output: Record<string, unknown> | undefined, key: string) {
+  const value = output?.[key];
+  return typeof value === "string" || typeof value === "number" ? String(value) : undefined;
+}
+
+/** 模型遗漏固定字段时，基于可信 Outcome 和工具证据生成完整四行结论。 */
+export function ensureCompleteFinalConclusion(run: AgentRun, value: string) {
+  const outcome = deriveAgentOutcome(run);
+  if (outcome.conclusion) {
+    return [
+      `工单需求：${outcome.conclusion.requirement}`,
+      `处理结果：${outcome.conclusion.result}`,
+      `处理依据：${outcome.conclusion.basis}`,
+      `下一步：${outcome.conclusion.nextStep}`,
+    ].join("\n");
+  }
+  const requiresTrustedOrdering = [
+    "refund_required",
+    "already_satisfied",
+    "waiting_approval",
+    "manual_review",
+  ].includes(outcome.decision);
+
+  // 高风险业务字段必须由服务端固定归位；普通只读结论格式完整时保留模型表达。
+  if (!requiresTrustedOrdering && hasCompleteConclusion(value)) {
+    return value.trim();
+  }
+
+  const ticket = getCompletedToolOutput(run, "updateTicketStatus") ?? getCompletedToolOutput(run, "getTicket");
+  const customer = getCompletedToolOutput(run, "getCustomer");
+  const order = getCompletedToolOutput(run, "getOrder");
+  const policy = getCompletedToolOutput(run, "searchPolicy");
+  const refund = getCompletedToolOutput(run, "createRefund");
+  const ticketId = readOutputText(ticket, "id");
+  const ticketStatus = readOutputText(ticket, "status");
+  const refundId = readOutputText(refund, "id");
+  const refundAmount = readOutputText(refund, "amount");
+  const refundStatus = readOutputText(refund, "status");
+  const actionText = outcome.performedActions.length > 0
+    ? `已执行 ${outcome.performedActions.join("、")}`
+    : "未执行业务写入";
+  const resultByDecision: Record<typeof outcome.decision, string> = {
+    read_only: `已完成只读查询或核查，${actionText}。`,
+    no_refund: `已完成核查，现有证据不支持退款，${actionText}。`,
+    refund_required: [
+      "已完成退款业务写入",
+      refundId ? `退款申请 ${refundId}` : undefined,
+      refundAmount ? `金额 ${refundAmount} 元` : undefined,
+      refundStatus ? `退款状态 ${refundStatus}` : undefined,
+      ticketId && ticketStatus ? `工单 ${ticketId} 已更新为 ${ticketStatus}` : undefined,
+    ].filter(Boolean).join("；") + "。",
+    already_satisfied: [
+      "目标业务状态此前已达成，本次未重复写入",
+      readOutputText(order, "refundStatus") ? `订单退款状态为 ${readOutputText(order, "refundStatus")}` : undefined,
+      ticketId && ticketStatus ? `工单 ${ticketId} 保持 ${ticketStatus}` : undefined,
+    ].filter(Boolean).join("；") + "。",
+    waiting_approval: "高风险操作尚未执行，当前正在等待人工审批。",
+    manual_review: "人工审批已拒绝，未创建退款，也未执行后续状态写入。",
+    failed: "任务未完成，具体原因请查看结构化错误信息。",
+    cancelled: "任务已取消，Agent 已停止后续处理。",
+  };
+  const nextByDecision: Record<typeof outcome.decision, string> = {
+    read_only: "如需继续处理，请提供明确的工单号或业务目标。",
+    no_refund: "请依据已命中的业务规则与客户沟通处理意见。",
+    refund_required: "请根据当前待审批状态完成后续人工确认。",
+    already_satisfied: "无需重复提交；请继续跟进现有退款审批记录。",
+    waiting_approval: "请完成人工审批，审批结果将决定是否继续执行。",
+    manual_review: "请根据拒绝原因补充材料或与客户沟通后续方案。",
+    failed: "请按错误建议修正后重试。",
+    cancelled: "确认现有业务状态后可重新发起任务。",
+  };
+  const evidenceParts = [
+    readOutputText(customer, "id") && readOutputText(customer, "level")
+      ? `客户 ${readOutputText(customer, "id")} 等级为 ${readOutputText(customer, "level")}`
+      : undefined,
+    readOutputText(order, "id") && readOutputText(order, "amount")
+      ? `订单 ${readOutputText(order, "id")} 金额 ${readOutputText(order, "amount")} 元、状态 ${readOutputText(order, "status") ?? "未知"}`
+      : undefined,
+    readOutputText(policy, "id") && readOutputText(policy, "title")
+      ? `命中规则 ${readOutputText(policy, "id")}（${readOutputText(policy, "title")}）`
+      : undefined,
+  ].filter((item): item is string => Boolean(item));
+  const evidence = evidenceParts.length > 0
+    ? `${evidenceParts.join("；")}。`
+    : outcome.evidence.length > 0
+      ? `可信工具轨迹已核验：${outcome.evidence.join("、")}。`
+      : "结论来自服务端可信执行状态和已完成工具轨迹。";
+
+  return [
+    `工单需求：${getTrustedTicketRequirement(run)}`,
+    `处理结果：${resultByDecision[outcome.decision]}`,
+    `处理依据：${evidence}`,
+    `下一步：${nextByDecision[outcome.decision]}`,
+  ].join("\n");
+}
+
 /** 基于完整执行 trace 再生成一次面向用户的精简结论，避免把过程日志或评测指标暴露到最终回复。 */
 async function buildFinalConclusionStep(run: AgentRun, index: number, candidate: string) {
   const finalPrompt = buildFinalConclusionPrompt({
@@ -826,12 +1001,16 @@ async function buildFinalConclusionStep(run: AgentRun, index: number, candidate:
   );
 
   recordLlmUsage(run, final.value.model, final.value.tokenUsage, Boolean(final.value.fallback));
+  const finalText = ensureCompleteFinalConclusion(run, final.value.text);
+  const usedStructureFallback = finalText !== final.value.text.trim();
 
   return createStep({
     index,
     type: "final",
-    title: final.value.isMock ? "生成最终回复（Mock LLM）" : "生成最终回复",
-    detail: final.value.text,
+    title: usedStructureFallback
+      ? "生成最终回复（结构兜底）"
+      : final.value.isMock ? "生成最终回复（Mock LLM）" : "生成最终回复",
+    detail: finalText,
     durationMs: final.durationMs,
     toolName: final.value.model,
     modelName: final.value.model,
@@ -843,7 +1022,7 @@ async function buildFinalConclusionStep(run: AgentRun, index: number, candidate:
 
 function parseErrorSummaryText(text: string) {
   try {
-    const parsed = JSON.parse(text) as { detailMessage?: unknown; suggestion?: unknown };
+    const parsed = parseStructuredJsonText(text) as { detailMessage?: unknown; suggestion?: unknown };
     return {
       detailMessage: typeof parsed.detailMessage === "string" ? parsed.detailMessage.trim() : undefined,
       suggestion: typeof parsed.suggestion === "string" ? parsed.suggestion.trim() : undefined,
@@ -1073,10 +1252,12 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
     }
 
     messages.push(buildPlanProgressMessage(activePlanStep));
+    // 每轮只向模型暴露当前步骤授权的工具，避免依赖文字提示阻止越权调用。
+    const activeTools = tools.filter((tool) => activePlanStep?.allowedTools.includes(tool.name));
     const assistant = await measureStep(() =>
       generateChat({
         messages,
-        tools,
+        tools: activeTools,
         temperature: 0.2,
         signal: getRunAbortSignal(run.id),
       }),

@@ -37,7 +37,7 @@ const conclusionSections = computed(() => {
     ];
   }
 
-  return buildBusinessConclusion(task, props.finalMessage, ticketRequirement.value);
+  return buildBusinessConclusion(task, props.finalMessage, ticketRequirement.value, props.run?.outcome);
 });
 
 function getResultDescription(run: AgentRun | undefined) {

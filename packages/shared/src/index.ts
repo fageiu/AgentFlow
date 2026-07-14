@@ -49,6 +49,13 @@ export interface AgentOutcome {
   performedActions: string[];
   evidence: string[];
   userMessage: string;
+  /** 前端固定四栏直接消费的可信业务摘要，由服务端工具轨迹派生。 */
+  conclusion?: {
+    requirement: string;
+    result: string;
+    basis: string;
+    nextStep: string;
+  };
 }
 
 export interface AgentErrorInfo {

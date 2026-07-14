@@ -24,7 +24,10 @@ function persistRuns() {
 /** 服务重启后没有 executor 继续推进旧 run，因此将执行中快照降级为可审计的失败记录。 */
 function normalizeRecoveredRun(run: AgentRun): AgentRun {
   if (run.status !== "running" && run.status !== "waiting_approval") {
-    return cloneRun(run);
+    const recoveredRun = cloneRun(run);
+    // 每次加载都从可信 trace 重建 Outcome，自动补齐旧版本缺失的结构化结论。
+    recoveredRun.outcome = deriveAgentOutcome(recoveredRun);
+    return recoveredRun;
   }
 
   const recoveredRun: AgentRun = {

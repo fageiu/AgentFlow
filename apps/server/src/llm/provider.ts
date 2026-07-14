@@ -327,7 +327,7 @@ function buildMockText(input: GenerateTextInput) {
   if (input.system.includes("[FINAL_CONCLUSION]")) {
     const ticketId = input.user.match(/T-\d+/i)?.[0]?.toUpperCase() ?? "该工单";
     const task = input.user.match(/用户任务：\s*([^\n]+)/)?.[1] ?? `处理 ${ticketId}`;
-    const candidate = input.user.match(/候选结论：([\s\S]*?)\n\n执行步骤：/)?.[1]?.trim();
+    const candidate = input.user.match(/候选表达（非事实证据）：([\s\S]*?)\n\n执行步骤：/)?.[1]?.trim();
     const statusMatch = input.user.match(/"status"\s*:\s*"([^"]+)"/);
     const status = statusMatch?.[1];
 
@@ -783,6 +783,7 @@ function parseAssistantMessage(data: ChatCompletionResponse): GenerateChatResult
 export async function generateText(input: GenerateTextInput): Promise<GenerateTextResult> {
   const config = getLlmConfig();
   throwIfRequestAborted(input.signal);
+  const expectsJson = /\[(?:PLANNER|REPLANNER|ACTION_PLANNER|ERROR_SUMMARY)\]/.test(input.system);
 
   if (config.mock || !config.apiKey || config.provider === "mock") {
     return createMockTextResult(input);
@@ -795,6 +796,8 @@ export async function generateText(input: GenerateTextInput): Promise<GenerateTe
         { role: "system", content: input.system },
         { role: "user", content: input.user },
       ],
+      // Planner 与错误摘要使用 JSON 模式；本地解析仍保留兼容修复，覆盖供应商格式差异。
+      response_format: expectsJson ? { type: "json_object" } : undefined,
       temperature: input.temperature ?? 0.2,
     }, input.signal);
 

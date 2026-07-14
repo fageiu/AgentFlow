@@ -30,7 +30,7 @@ function createEvaluationRun(): EvaluationRun {
     config: {
       provider: llmConfig.provider,
       model: llmConfig.model,
-      promptVersion: process.env.AGENTFLOW_PROMPT_VERSION ?? "default-tool-calling-v1",
+      promptVersion: process.env.AGENTFLOW_PROMPT_VERSION ?? "default-tool-calling-v2",
       mock: llmConfig.mock,
     },
     summary: {

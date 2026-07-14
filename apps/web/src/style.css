@@ -1100,6 +1100,18 @@ button:disabled {
   white-space: nowrap;
 }
 
+.plan-progress-title-block {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.plan-progress-title-block > small {
+  color: #94a3b8;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+}
+
 .plan-progress-item > small {
   color: #94a3b8;
   font-size: 11px;
@@ -1202,6 +1214,100 @@ button:disabled {
   color: #b91c1c;
   font-size: 11px;
   line-height: 1.45;
+}
+
+.plan-tool-detail {
+  grid-column: 2 / -1;
+  margin: 1px 0 5px;
+  border-left: 2px solid #dbe4ec;
+  padding: 2px 0 2px 9px;
+  color: #475569;
+}
+
+.standalone-tool-detail {
+  margin-top: 6px;
+}
+
+.plan-tool-detail summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: fit-content;
+  cursor: pointer;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  list-style: none;
+}
+
+.plan-tool-detail summary::-webkit-details-marker {
+  display: none;
+}
+
+.plan-tool-detail summary::before {
+  content: "›";
+  color: #94a3b8;
+  transition: transform 0.15s ease;
+}
+
+.plan-tool-detail[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.plan-tool-detail summary small {
+  color: #94a3b8;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.plan-tool-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 7px 0;
+}
+
+.plan-tool-meta div {
+  display: flex;
+  gap: 5px;
+}
+
+.plan-tool-meta dt {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.plan-tool-meta dd {
+  margin: 0;
+  color: #334155;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+}
+
+.plan-tool-payload {
+  margin-top: 6px;
+}
+
+.plan-tool-payload > strong {
+  display: block;
+  margin-bottom: 3px;
+  color: #64748b;
+  font-size: 10px;
+}
+
+.plan-tool-payload pre {
+  max-height: 220px;
+  margin: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  padding: 7px 8px;
+  overflow: auto;
+  color: #334155;
+  background: #f8fafc;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 /* 流式等待是当前活动提示，不再以步骤卡片抢占阅读空间。 */

@@ -50,8 +50,8 @@ test("Planner 应容忍展示字段缺失，但只保留单个已注册工具授
   }));
 
   assert.deepEqual(plan.steps.map((step) => step.allowedTools[0]), ["getCustomer", "getOrder"]);
-  assert.equal(plan.steps[1]?.title, "执行 getOrder");
-  assert.ok(plan.steps[1]?.objective.includes("getOrder"));
+  assert.equal(plan.steps[1]?.title, "读取订单");
+  assert.ok(plan.steps[1]?.objective.includes("订单金额"));
 });
 
 test("Planner 没有任何可执行工具授权时仍应拒绝计划", async () => {
@@ -70,6 +70,162 @@ test("Planner 没有任何可执行工具授权时仍应拒绝计划", async () 
 
   assert.ok(thrown instanceof Error);
   assert.ok(/no executable tool step/.test(thrown.message));
+});
+
+test("预读取工单上下文的首轮计划仍应使用 Planner 角色", async () => {
+  const { buildPlanPrompt } = await import("../llm/prompts.js");
+  const prompt = buildPlanPrompt("处理工单 T-1001", {
+    ticketContext: { id: "T-1001", customerId: "C-9001", orderId: "O-7001" },
+  });
+
+  assert.ok(prompt.system.includes("[PLANNER]"));
+  assert.ok(!prompt.system.includes("[REPLANNER]"));
+  assert.ok(prompt.system.includes("禁止规划 createRefund 或 updateTicketStatus"));
+});
+
+test("Replanner Prompt 应明确要求首先重试失败工具", async () => {
+  const { buildPlanPrompt } = await import("../llm/prompts.js");
+  const prompt = buildPlanPrompt("处理工单 T-1001", {
+    completedTools: ["getCustomer"],
+    observation: "keyword 未命中",
+    requiredFirstTool: "searchPolicy",
+  });
+
+  assert.ok(prompt.system.includes("[REPLANNER]"));
+  assert.ok(prompt.system.includes("第一个工具必须是 searchPolicy"));
+  assert.ok(prompt.user.includes("必须首先重试的工具：searchPolicy"));
+});
+
+test("Planner 应兼容 JSON 代码块和 JSON 前后的简短说明", async () => {
+  const { parseAgentPlan } = await import("./executor.js");
+  const json = JSON.stringify({
+    version: 1,
+    summary: "读取客户。",
+    steps: [{ id: "customer", allowedTools: ["getCustomer"] }],
+  });
+
+  assert.equal(parseAgentPlan(`\`\`\`json\n${json}\n\`\`\``).steps[0]?.allowedTools[0], "getCustomer");
+  assert.equal(parseAgentPlan(`计划如下：\n${json}\n请执行。`).steps[0]?.allowedTools[0], "getCustomer");
+});
+
+test("最终回复字段为空时应使用可信 Outcome 生成完整结论", async () => {
+  const { ensureCompleteFinalConclusion } = await import("./executor.js");
+  const now = new Date().toISOString();
+  const run: AgentRun = {
+    id: "run-final-structure-fallback",
+    task: "处理工单 T-1001：核查退款诉求。",
+    status: "completed",
+    createdAt: now,
+    completedAt: now,
+    steps: [{
+      id: "ticket-step",
+      type: "tool_call",
+      title: "读取工单",
+      detail: JSON.stringify({ output: { id: "T-1001", description: "客户申请退款。" } }),
+      toolName: "getTicket",
+      status: "completed",
+    }],
+  };
+
+  const conclusion = ensureCompleteFinalConclusion(
+    run,
+    "工单需求：T-1001 客户申请退款。\n处理结果：\n处理依据：\n下一步：",
+  );
+
+  for (const label of ["工单需求", "处理结果", "处理依据", "下一步"]) {
+    assert.ok(new RegExp(`${label}：\\S+`).test(conclusion));
+  }
+  assert.ok(conclusion.includes("未执行业务写入"));
+});
+
+test("退款结论字段即使非空也应按可信工具语义重新归位", async () => {
+  const { ensureCompleteFinalConclusion } = await import("./executor.js");
+  const now = new Date().toISOString();
+  const createToolStep = (
+    id: string,
+    toolName: string,
+    output: Record<string, unknown>,
+  ): AgentStep => ({
+    id,
+    type: "tool_call",
+    title: `执行 ${toolName}`,
+    detail: JSON.stringify({ output }),
+    toolName,
+    status: "completed",
+  });
+  const run: AgentRun = {
+    id: "run-final-semantic-order",
+    task: "处理工单 T-1001：创建退款并同步状态。",
+    status: "completed",
+    createdAt: now,
+    completedAt: now,
+    steps: [
+      createToolStep("ticket", "getTicket", { id: "T-1001", description: "客户申请退款。", status: "open" }),
+      createToolStep("customer", "getCustomer", { id: "C-9001", level: "vip" }),
+      createToolStep("order", "getOrder", { id: "O-7001", amount: 6800, status: "completed" }),
+      createToolStep("policy", "searchPolicy", { id: "P-refund-001", title: "VIP 客户退款规则" }),
+      createToolStep("refund", "createRefund", {
+        id: "R-0001",
+        amount: 6800,
+        status: "pending_approval",
+        operation: "created",
+      }),
+      createToolStep("update", "updateTicketStatus", {
+        id: "T-1001",
+        status: "waiting_approval",
+        operation: "updated",
+      }),
+    ],
+  };
+  const misplaced = [
+    "工单需求：客户申请退款。",
+    "处理结果：客户申请退款，工单编号 T-1001。",
+    "处理依据：已创建退款并更新工单。",
+    "下一步：工单 T-1001 状态 open、优先级 high。",
+  ].join("\n");
+  const conclusion = ensureCompleteFinalConclusion(run, misplaced);
+
+  assert.ok(conclusion.includes("处理结果：退款处理已完成；退款申请 R-0001"));
+  assert.ok(conclusion.includes("处理依据：客户 C-9001 等级 vip"));
+  assert.ok(conclusion.includes("下一步：请继续跟进待审批退款状态并完成后续人工确认"));
+  assert.ok(!conclusion.includes("下一步：工单 T-1001 状态 open"));
+});
+
+test("SLA 查询任务的处理结果应展示真实规则命中内容", async () => {
+  const { deriveAgentOutcome } = await import("./outcome.js");
+  const now = new Date().toISOString();
+  const toolStep = (id: string, toolName: string, output: Record<string, unknown>): AgentStep => ({
+    id,
+    type: "tool_call",
+    title: `执行 ${toolName}`,
+    detail: JSON.stringify({ output }),
+    toolName,
+    status: "completed",
+  });
+  const run: AgentRun = {
+    id: "run-sla-query-conclusion",
+    task: "处理工单 T-1003：核查 SLA 并给出补偿方案。",
+    status: "completed",
+    createdAt: now,
+    completedAt: now,
+    steps: [
+      toolStep("ticket", "getTicket", { id: "T-1003", description: "核心接口连续两小时不可用。", status: "open" }),
+      toolStep("customer", "getCustomer", { id: "C-9003", level: "enterprise" }),
+      toolStep("order", "getOrder", { id: "O-7003", amount: 42800, status: "completed" }),
+      toolStep("policy", "searchPolicy", {
+        id: "P-sla-001",
+        keyword: "sla",
+        title: "SLA 服务不可用处理规则",
+        content: "服务不可用超过 60 分钟时，应升级给值班经理并评估补偿。",
+      }),
+    ],
+  };
+  const outcome = deriveAgentOutcome(run);
+
+  assert.ok(outcome.conclusion?.result.includes("P-sla-001"));
+  assert.ok(outcome.conclusion?.result.includes("服务不可用超过 60 分钟"));
+  assert.ok(outcome.conclusion?.nextStep.includes("评估 SLA 影响范围"));
+  assert.ok(!outcome.conclusion?.result.includes("P-refund-001"));
 });
 
 test("确定性 Judge 应根据结构化 Outcome 判断业务结论而非回复措辞", async () => {

@@ -6,6 +6,7 @@ import type {
   ConversationSessionSummary,
 } from "@agentflow/shared";
 import { readPersistentState, writePersistentState } from "../storage/persistentState.js";
+import { deriveAgentOutcome } from "../agent/outcome.js";
 
 const sessions = new Map<string, ConversationSession>();
 
@@ -44,11 +45,19 @@ function normalizeRecoveredSession(session: ConversationSession): ConversationSe
   const recovered = cloneSession(session);
 
   recovered.messages = recovered.messages.map((message) => {
-    if (message.role !== "assistant" || (message.status !== "running" && message.status !== "waiting_approval")) {
+    if (message.role !== "assistant") {
       return message;
     }
 
-    return {
+    if (message.status !== "running" && message.status !== "waiting_approval") {
+      if (!message.run) return message;
+      const normalizedRun = { ...message.run, steps: message.run.steps.map((step) => ({ ...step })) };
+      // 会话内嵌的历史 Run 同样重建 Outcome，避免旧模型错位文本继续影响前端。
+      normalizedRun.outcome = deriveAgentOutcome(normalizedRun);
+      return { ...message, run: normalizedRun };
+    }
+
+    const interruptedMessage: ConversationMessage = {
       ...message,
       content: "Agent 执行已中断。",
       errorMessage: "后端服务曾重启，本次执行无法继续，可重试上一条任务。",
@@ -69,6 +78,10 @@ function normalizeRecoveredSession(session: ConversationSession): ConversationSe
         status: step.status === "running" ? "failed" : step.status,
       })),
     };
+    if (interruptedMessage.run) {
+      interruptedMessage.run.outcome = deriveAgentOutcome(interruptedMessage.run);
+    }
+    return interruptedMessage;
   });
   recovered.activeRunId = undefined;
 

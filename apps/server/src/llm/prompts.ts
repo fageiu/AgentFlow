@@ -1,31 +1,38 @@
-import type { AgentPlan } from "@agentflow/shared";
-import type { FinalPromptInput, LlmChatMessage } from "./types.js";
+import type { AgentOutcome, AgentPlan } from "@agentflow/shared";
+import type { LlmChatMessage } from "./types.js";
 
 /** 构建结构化计划 Prompt，让 Planner 为 Executor 声明最小工具授权。 */
 export function buildPlanPrompt(task: string, input?: {
   completedTools?: string[];
   observation?: string;
+  requiredFirstTool?: string;
   ticketContext?: unknown;
 }) {
+  const isReplan = Boolean(input?.requiredFirstTool);
+
   return {
     system: [
-      input ? "[REPLANNER]" : "[PLANNER]",
+      isReplan ? "[REPLANNER]" : "[PLANNER]",
       "你是企业工单处理 Agent 的 Planner。请只输出严格 JSON，不要 Markdown，也不要编造工具结果。",
-      "JSON 格式：{\"version\":1,\"summary\":\"...\",\"steps\":[{\"id\":\"...\",\"title\":\"...\",\"objective\":\"...\",\"allowedTools\":[\"...\"],\"requiresApproval\":false}]}。",
+      "最小 JSON 格式：{\"version\":1,\"summary\":\"...\",\"steps\":[{\"id\":\"...\",\"allowedTools\":[\"...\"]}]}。",
       "每个执行步骤只能授权一个工具；可用工具只有 listTickets、searchTickets、getTicket、getCustomer、getOrder、searchPolicy、createRefund、updateTicketStatus。",
-      "此阶段仅规划读取和核查步骤，不要规划 createRefund 或 updateTicketStatus。是否写入必须等待客户、订单和规则均已读取后再判断。",
+      "此 Planner 只规划读取和核查步骤，禁止规划 createRefund 或 updateTicketStatus；写入动作由证据齐备后的 Action Planner 单独决定。",
       "查询、列出、筛选或统计工单时，只规划 listTickets 或 searchTickets，禁止 createRefund 和 updateTicketStatus。",
       input?.ticketContext
-        ? "已提供真实工单上下文：不得重复规划 getTicket；根据其中的客户、订单、优先级、状态和诉求，继续规划 getCustomer、getOrder、searchPolicy 及必要的后续动作。"
-        : "退款任务应依次规划 getTicket、getCustomer、getOrder、searchPolicy、createRefund、updateTicketStatus；createRefund 的 requiresApproval 必须为 true。",
-      "只有确实需要变更状态时才规划 updateTicketStatus。计划步骤数量限制在 1-6 步。",
-      input ? "这是一次重规划：只输出尚未完成的后续步骤，不能重复已完成工具。" : "",
+        ? "已提供真实工单上下文：不得重复规划 getTicket；根据其中的 customerId、orderId 和诉求继续规划 getCustomer、getOrder、searchPolicy。"
+        : "处理单张工单时，按需规划 getTicket、getCustomer、getOrder、searchPolicy；不得提前规划任何写入。",
+      "计划步骤数量限制在 1-6 步；title、objective 和 requiresApproval 可省略，Executor 会根据工具注册表补全。",
+      isReplan ? "这是一次失败恢复重规划：只输出尚未完成的步骤，不能重复已成功完成的工具。" : "",
+      isReplan
+        ? `steps 的第一个工具必须是 ${input?.requiredFirstTool}，并根据执行观察修正其参数；成功重试前不得规划其他工具。`
+        : "",
     ].join("\n"),
     user: [
       `用户任务：${task}`,
       input?.ticketContext ? `已读取工单上下文：${JSON.stringify(input.ticketContext)}` : "",
-      input ? `已完成工具：${input.completedTools?.join(", ") || "无"}` : "",
-      input ? `执行观察：${input.observation ?? "无"}` : "",
+      isReplan ? `已完成工具：${input?.completedTools?.join(", ") || "无"}` : "",
+      isReplan ? `必须首先重试的工具：${input?.requiredFirstTool}` : "",
+      isReplan ? `执行观察：${input?.observation ?? "无"}` : "",
     ].filter(Boolean).join("\n\n"),
   };
 }
@@ -41,9 +48,10 @@ export function buildActionPlanPrompt(input: {
     system: [
       "[ACTION_PLANNER]",
       "你是企业工单处理 Agent 的决策 Planner。请只输出严格 JSON，不要 Markdown。",
-      "JSON 格式：{\"version\":1,\"summary\":\"...\",\"steps\":[{\"id\":\"...\",\"title\":\"...\",\"objective\":\"...\",\"allowedTools\":[\"...\"],\"requiresApproval\":true}]}。",
+      "最小 JSON 格式：{\"version\":1,\"summary\":\"...\",\"steps\":[{\"id\":\"create-refund\",\"allowedTools\":[\"createRefund\"]},{\"id\":\"sync-ticket\",\"allowedTools\":[\"updateTicketStatus\"]}]}。",
       "你只能规划 createRefund 和 updateTicketStatus，或者返回空 steps。",
       "必须根据真实客户、订单和规则证据判断：仅当规则与实际情况支持退款时，才依次规划 createRefund（requiresApproval=true）和 updateTicketStatus；否则返回空 steps。",
+      "requiresApproval 由服务端工具风险等级决定，可以省略；不要自行改变工具风险等级。",
       "如果证据表明订单 refundStatus 已是 pending_approval 且工单已是 waiting_approval，说明目标状态已经达成，必须返回空 steps，不能重复审批或关闭工单。",
       "涉及天数、有效期或退款窗口时，必须使用提供的业务基准日期计算，不得以“当前日期未知”为由跳过判断。",
       "不要因为用户提到退款就默认执行；也不要编造未在证据中出现的资格或金额。",
@@ -153,23 +161,6 @@ export function buildErrorSummaryPrompt(input: {
       `用户任务：${input.task}`,
       `结构化错误：${JSON.stringify(input.error, null, 2)}`,
       `执行步骤：${JSON.stringify(input.steps, null, 2)}`,
-    ].join("\n\n"),
-  };
-}
-
-/** 构建最终结论 Prompt，保留给非 Tool Calling 的兼容场景和后续评测脚本。 */
-export function buildFinalPrompt(input: FinalPromptInput) {
-  return {
-    system:
-      "你是企业客服流程 Agent。请根据用户任务、工单、客户和规则检索结果生成处理结论。必须说明判断依据、是否建议退款、是否需要人工审批、下一步操作。",
-    user: [
-      `用户任务：${input.task}`,
-      `工单信息：${JSON.stringify(input.ticket, null, 2)}`,
-      `客户信息：${JSON.stringify(input.customer, null, 2)}`,
-      `订单信息：${JSON.stringify(input.order, null, 2)}`,
-      `规则信息：${JSON.stringify(input.policy, null, 2)}`,
-      `退款记录：${JSON.stringify(input.refund ?? null, null, 2)}`,
-      `工单状态变更：${JSON.stringify(input.ticketStatusUpdate ?? null, null, 2)}`,
     ].join("\n\n"),
   };
 }
