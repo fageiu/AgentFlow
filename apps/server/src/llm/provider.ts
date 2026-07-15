@@ -39,6 +39,35 @@ interface ChatCompletionResponse {
   };
 }
 
+/** 使用候选配置发起最小请求，保存前即可验证地址、密钥和模型是否可用。 */
+export async function testLlmConnection(config: LlmConfig) {
+  const startedAt = Date.now();
+
+  if (config.mock || config.provider === "mock") {
+    return {
+      latencyMs: Date.now() - startedAt,
+      mode: "mock" as const,
+    };
+  }
+
+  if (!config.apiKey) {
+    throw new LlmProviderError("LLM API Key is not configured.", {}, { retryable: false });
+  }
+
+  const response = await requestChatCompletion({ ...config, fallbackOnError: false }, {
+    model: config.model,
+    messages: [{ role: "user", content: "Reply with OK." }],
+    max_tokens: 4,
+    temperature: 0,
+  });
+  await response.text();
+
+  return {
+    latencyMs: Date.now() - startedAt,
+    mode: "real" as const,
+  };
+}
+
 function estimateTokens(text: string) {
   return Math.max(1, Math.ceil(text.length / 4));
 }
@@ -310,6 +339,91 @@ function buildMockText(input: GenerateTextInput) {
     }
 
     return JSON.stringify(plan);
+  }
+
+  if (input.system.includes("[BUSINESS_DECISION]")) {
+    const packet = JSON.parse(input.user.match(/可信事实包：([^\n]+)/)?.[1] ?? "{}") as {
+      trustedDecision?: string;
+      performedActions?: string[];
+      facts?: Array<{ id: string; value: unknown }>;
+    };
+    const deterministicConclusion = JSON.parse(input.user.match(/确定性结论：([^\n]+)/)?.[1] ?? "{}") as {
+      result?: string;
+      nextStep?: string;
+    };
+    const facts = packet.facts ?? [];
+    const factValue = (id: string) => facts.find((fact) => fact.id === id)?.value;
+    const availableIds = new Set(facts.map((fact) => fact.id));
+    const evidenceIds = [
+      "tool.getTicket.status",
+      "tool.getTicket.priority",
+      "tool.searchPolicy.keyword",
+      "tool.searchPolicy.content",
+      "outcome.decision",
+      "outcome.performedActions",
+    ].filter((id) => availableIds.has(id));
+    const fallbackEvidenceIds = evidenceIds.length > 0 ? evidenceIds : facts.slice(0, 2).map((fact) => fact.id);
+    const policyKeyword = String(factValue("tool.searchPolicy.keyword") ?? "");
+    const policyTitle = String(factValue("tool.searchPolicy.title") ?? "已命中业务规则");
+    const policyContent = String(factValue("tool.searchPolicy.content") ?? "");
+    const performedActions = packet.performedActions ?? [];
+    const noWriteText = performedActions.length === 0
+      ? "本次工具轨迹没有业务写入，因此结论不能表述为已执行状态变更。"
+      : `本次已执行 ${performedActions.join("、")}，处理结果应反映这些真实动作。`;
+    const reasoning = [
+      {
+        claim: policyContent
+          ? `命中${policyTitle}，规则要求“${policyContent}”，因此处理判断必须遵守该业务约束。`
+          : `服务端可信决策为 ${packet.trustedDecision ?? "未知"}，处理结果必须与已完成工具轨迹保持一致。`,
+        evidenceIds: fallbackEvidenceIds,
+      },
+      {
+        claim: noWriteText,
+        evidenceIds: availableIds.has("outcome.performedActions")
+          ? ["outcome.performedActions"]
+          : fallbackEvidenceIds,
+      },
+    ];
+
+    const recommendationByPolicy: Record<string, { action: string; owner: "human" | "customer_service"; reason: string; condition?: string }> = {
+      security: {
+        action: "提交人工审批，并根据审批结果决定是否执行工单关闭。",
+        owner: "human",
+        reason: "高风险工单关闭规则要求人工确认，Agent 不能直接关闭。",
+        condition: "只有审批通过后才能执行关闭；审批拒绝时保持当前状态。",
+      },
+      sla: {
+        action: "转人工核查 SLA 影响范围并制定补偿方案。",
+        owner: "customer_service",
+        reason: "补偿需要结合实际影响范围和客户合同等级判断。",
+      },
+      "发票": {
+        action: "依据发票规则记录处理意见并继续协助客户。",
+        owner: "customer_service",
+        reason: "当前场景属于发票服务处理，不应进入退款写入流程。",
+      },
+      "duplicate-refund": {
+        action: "核对既有退款记录后再决定是否需要人工介入。",
+        owner: "customer_service",
+        reason: "重复退款场景必须避免为同一订单重复创建申请。",
+      },
+    };
+    const recommendation = recommendationByPolicy[policyKeyword] ?? {
+      action: deterministicConclusion.nextStep ?? "根据当前业务状态继续跟进。",
+      owner: "customer_service" as const,
+      reason: "该建议由已完成的业务核查结果和当前状态共同决定。",
+    };
+
+    return JSON.stringify({
+      reasoning,
+      result: policyContent && packet.trustedDecision === "read_only"
+        ? `核查完成。${policyTitle}规定：${policyContent}；结合真实工具轨迹，本次未执行业务写入。`
+        : deterministicConclusion.result ?? "已根据可信事实完成业务判断。",
+      recommendation: {
+        ...recommendation,
+        evidenceIds: fallbackEvidenceIds,
+      },
+    });
   }
 
   if (input.system.includes("[ERROR_SUMMARY]")) {
@@ -785,7 +899,7 @@ function parseAssistantMessage(data: ChatCompletionResponse): GenerateChatResult
 export async function generateText(input: GenerateTextInput): Promise<GenerateTextResult> {
   const config = getLlmConfig();
   throwIfRequestAborted(input.signal);
-  const expectsJson = /\[(?:PLANNER|REPLANNER|ACTION_PLANNER|ERROR_SUMMARY)\]/.test(input.system);
+  const expectsJson = /\[(?:PLANNER|REPLANNER|ACTION_PLANNER|BUSINESS_DECISION|ERROR_SUMMARY)\]/.test(input.system);
 
   if (config.mock || !config.apiKey || config.provider === "mock") {
     return createMockTextResult(input);

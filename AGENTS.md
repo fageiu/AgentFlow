@@ -22,6 +22,7 @@
 - `apps/server/src/main.ts`：Fastify 路由、SSE 响应流、审批接口。
 - `apps/server/src/agent/executor.ts`：Agent 执行流程、步骤事件生成、Tool Calling 循环和审批暂停/恢复。
 - `apps/server/src/agent/outcome.ts`：根据 Run 终态、审批决议和真实工具轨迹派生结构化业务结论，禁止信任模型自报动作。
+- `apps/server/src/agent/businessDecision.ts`：从可信工具轨迹构造 EvidencePacket，校验模型的事实引用、动作声明与推荐，并在失败时回退确定性 Outcome。
 - `apps/server/src/agent/errors.ts`：Agent 统一错误模型，负责错误分类、用户提示、结构化错误码和 SSE error payload。
 - `apps/server/src/agent/runControl.ts`：AgentRun 取消请求的进程内控制状态，executor 在步骤边界读取它来停止执行。
 - `apps/server/src/agent/cancelRun.ts`：取消生命周期校验与审批唤醒编排，负责区分不存在、已结束、已取消和可取消 run。
@@ -43,6 +44,8 @@
 - 没有 API Key 时必须保持 Mock fallback，保证本地 Demo 可运行。
 - Tool Calling 消息统一使用 `apps/server/src/llm/types.ts` 中的内部类型，再由 provider 转换为 OpenAI-compatible 请求格式。
 - Provider 请求必须复用统一的超时、429/5xx 重试和取消信号；触发 Mock fallback 时必须写入结构化 fallback 元数据，不能把调试文本混入模型结构化输出。
+- 前端模型设置通过 `/llm/config` 系列接口更新服务端运行时配置；API Key 只保存在后端进程内存中且禁止回显或写入浏览器存储，服务重启后重新以环境变量为准。
+- 模型配置只能在没有 Agent Run 或批量评测执行时切换；连接测试复用 Provider 的超时、重试和统一错误模型。
 
 ## Tool Registry 约定
 
@@ -74,6 +77,7 @@
 - Week 10 起，`runStore`、`conversationStore` 和 `approvalStore` 的内存 Map 会同步写入本地 JSON；重启后无法继续的 `running`/`waiting_approval` run 必须降级为可重试的中断状态。
 - Agent 错误必须经过 `errors.ts` 归一化；工具失败、业务数据不存在、模型异常和系统异常都应写入 failed trace，并在 run 快照中保存结构化 `error`。
 - 新 Run 进入 completed、failed、cancelled 或 waiting_approval 时必须写入结构化 `outcome`；`decision` 与 `performedActions` 只能由服务端可信轨迹派生，`userMessage` 才允许来自模型自然语言。
+- 模型可基于 EvidencePacket 生成 `reasoning` 与 `recommendation`，但每条判断必须引用真实 evidence ID；服务端校验通过后才能进入 Outcome，且不得改变可信 `decision` 或虚构未发生的写入。
 
 ## Evaluation 约定
 

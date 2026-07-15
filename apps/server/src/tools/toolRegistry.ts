@@ -117,7 +117,10 @@ const jsonSchemas = {
   searchPolicy: {
     type: "object",
     properties: {
-      keyword: { type: "string", description: "规则关键词；退款场景使用 refund。" },
+      keyword: {
+        type: "string",
+        description: "规则关键词，必须依据工单诉求选择：refund、approval、发票、cancel、sla、upgrade、duplicate-refund 或 security。",
+      },
     },
     required: ["keyword"],
     additionalProperties: false,

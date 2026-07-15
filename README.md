@@ -12,6 +12,7 @@ AgentFlow 是一个面向企业流程自动化的 AI Agent Runtime 与 Evaluatio
 - **可观测与可恢复**：通过 SSE 展示执行时间线，持久化 AgentRun、会话和审批快照，并将服务重启时无法继续的任务降级为可重试中断状态。
 - **确定性 Agent 评测**：内置 18 条 golden task，覆盖查询、知识检索、退款、审批边界、异常安全和幂等性；同时断言最终回答、工具轨迹与业务副作用。
 - **结构化业务 Outcome**：服务端根据真实工具轨迹和审批决议派生 `decision`、实际写入动作与证据引用，自然语言措辞变化不再影响核心业务判定。
+- **业务语义约束**：单工单任务会预读取真实上下文，规则检索依据工单标题和描述归一到退款、审批、发票、SLA、升级、取消、重复退款或安全规则，降低模型误选工具和关键词的概率。
 - **模型层解耦**：统一封装 OpenAI-compatible Provider，支持兼容模型切换和 Mock fallback，便于本地演示与稳定回归。
 
 完整设计见 [Agent 执行架构](docs/architecture.md)。
@@ -28,6 +29,8 @@ AgentFlow 是一个面向企业流程自动化的 AI Agent Runtime 与 Evaluatio
 - Trace 历史：运行完成或等待审批时保存 `AgentRun` 快照，前端可恢复查看。
 - Human Approval：`riskLevel: "high"` 的工具调用会暂停等待用户批准或拒绝。
 - Conversation Workspace：前端支持单会话多轮消息流，每条用户消息触发一次 Agent run，并把 trace 挂在对应 Agent 回复下。
+- Workspace Starter：空会话提供退款处理、SLA 核查和批量查询任务模板，模板只填入编辑器，由用户确认后执行。
+- Business Context：右侧面板可跟随当前任务中的工单号，也可手动切换工单；未指定工单时展示沙箱业务概览。
 - Recoverable Conversations：后端维护会话摘要和完整消息快照，前端可以创建、切换和恢复多轮会话。
 - Run Control：支持取消当前执行、重试上一条任务，并在刷新恢复时提示可重试的中断消息。
 - Evaluation Workbench：内置 18 条评测用例，支持按能力分组运行、断言诊断、工具轨迹、token/工具调用指标和模型/Prompt A/B 对比。
@@ -36,12 +39,15 @@ AgentFlow 是一个面向企业流程自动化的 AI Agent Runtime 与 Evaluatio
 
 ```txt
 apps/
-  web/                 Vue 3 + Vite 前端工作台
-  server/              Fastify 后端、Agent 执行器、LLM Provider、审批和沙箱工具
+  web/                 Vue 3 + Vite 前端工作台、会话、Trace 与评测界面
+  server/              Fastify API、Agent 执行器、LLM、工具、审批、Trace 与评测
 packages/
   shared/              前后端共享类型和 SSE 事件契约
 docs/
-  roadmap.md           阶段规划
+  architecture.md      Agent 执行架构与关键状态流
+  demo-guide.md        演示流程
+  roadmap.md           分阶段演进记录
+  evaluation-results/  Mock 与真实模型评测报告
 ```
 
 ## 执行链路
@@ -70,12 +76,12 @@ docs/
 - `GET /agent/run/stream?task=...`：SSE 流式执行入口。
 - `GET /agent/runs`：读取运行历史摘要。
 - `GET /agent/runs/:runId`：读取单次运行完整 trace。
-- `DELETE /agent/runs`：清空内存运行历史。
+- `DELETE /agent/runs`：清空运行历史。
 - `GET /agent/conversations`：读取可恢复会话摘要列表。
 - `POST /agent/conversations`：创建一个新的会话。
 - `GET /agent/conversations/:conversationId`：读取完整会话消息和嵌入式 trace。
 - `DELETE /agent/conversations/:conversationId`：删除单个空闲会话，运行中的会话会返回 409。
-- `DELETE /agent/conversations`：清空内存会话列表。
+- `DELETE /agent/conversations`：清空会话列表。
 - `GET /agent/runs/:runId/approval`：读取当前等待中的审批。
 - `POST /agent/runs/:runId/approve`：批准当前等待中的高风险工具调用。
 - `POST /agent/runs/:runId/reject`：拒绝当前等待中的高风险工具调用。
@@ -88,7 +94,13 @@ docs/
 
 ## LLM 配置
 
-服务端通过 `apps/server/src/llm/provider.ts` 统一封装模型调用。可以在项目根目录新建 `.env`：
+服务端通过 `apps/server/src/llm/provider.ts` 统一封装模型调用。先复制根目录的配置示例：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+OpenAI-compatible 示例：
 
 ```bash
 LLM_PROVIDER=openai-compatible
@@ -167,32 +179,30 @@ pnpm eval:gate
 
 CI 不读取真实模型密钥，也不会产生模型 API 费用。真实模型冒烟和全量回归仍需在获得明确费用授权后单独执行，避免把 Mock 成绩与真实模型成绩混淆。
 
-### 已验证的真实模型冒烟结果
+### 当前已保存的评测基线
 
-使用 `deepseek-v4-flash`、关闭 Mock fallback，在查询、非退款咨询和审批拒绝3条代表性 Case 上完成两轮真实模型评测：
+| 报告 | 模式 | 结果 | 说明 |
+|---|---|---:|---|
+| [Mock 全量基线](docs/evaluation-results/mock-full.md) | Mock | 18/18 | 用于本地确定性回归和 CI 门禁 |
+| [DeepSeek Outcome 全量评测](docs/evaluation-results/deepseek-post-outcome-full.md) | 真实模型 | 17/18 | 17 条通过、1 条因 Planner step 校验失败而异常 |
+| [Planner 稳健性定向复测](docs/evaluation-results/deepseek-planner-robustness-targeted.md) | 真实模型 | 1/1 | 上述幂等性失败路径定向复测通过 |
 
-| 轮次 | 通过 | 失败 | 异常 | 平均耗时 | 总 Token | 回归变化 |
-|---|---:|---:|---:|---:|---:|---|
-| 修复前 | 1/3 | 2 | 0 | 23.5 s | 35,029 | 首次运行 |
-| 修复后 | 3/3 | 0 | 0 | 28.4 s | 37,596 | 2 recovered、0 regressed |
-
-失败 Trace 表明：查询结果在最终总结阶段丢失明细；退款决策因缺少业务基准日期而无法判断30天窗口。修复后，最终回复会保留用户要求的查询字段，沙箱通过固定业务日期执行可重复的时间规则判断。完整结果见 [DeepSeek 冒烟评测报告](docs/evaluation-results/deepseek-smoke.md)。
-
-以上结果仅代表3条冒烟用例，不等同于完整18条评测集的真实模型通过率。
-
-完整18条真实模型首轮评测随后取得 `14 passed / 1 failed / 3 errors`，通过率为 77.8%，共消耗 252,495 Token，平均每条耗时 26.3 秒。失败集中在计划耗尽后重复调用工具、工具失败消息配对、退款待审批状态约束和重复执行幂等性。
-
-执行器与状态机修复后，对上述4条失败 Case 进行定向真实复测，结果为 `4/4 passed`、0 failed、0 errors，共消耗 53,415 Token。报告见 [DeepSeek 当前全量回归报告](docs/evaluation-results/deepseek-full.md) 与 [失败 Case 定向复测报告](docs/evaluation-results/deepseek-fix-smoke.md)。
-
-定向复测通过只能证明已覆盖的4条失败路径恢复；在第二轮完整18条真实评测完成前，不将其表述为“真实模型全量18/18通过”。
-
-第二轮完整18条真实评测仍为 `14/18`，其中3条恢复、3条新回归，说明真实模型在筛选工具选择、规则关键词、审批标志和退款写入判断上存在非确定性漂移。项目因此进一步将这些约束下沉到服务端：查询条件决定只读工具、规则意图归一化、审批属性绑定 Tool Registry 风险等级、非明确退款诉求禁止解锁写入。下沉后本地确定性评测保持 `18/18`，但在再次完成真实模型全量回归前，不宣称最终真实通过率已经提升。
+真实模型全量报告的通过率为 94.4%，共消耗 185,322 Token；随后通过的单 Case 定向复测只证明对应失败路径已恢复，不等同于重新完成全量 18/18 回归。报告记录的是特定模型、Prompt 和代码版本下的实验结果，不能视为对后续版本的永久保证。
 
 ## 本地运行
+
+前置环境：Node.js 20 或更高版本、pnpm 9（仓库声明版本为 `9.15.0`）。
 
 ```bash
 pnpm install
 pnpm dev
+```
+
+也可以只启动一侧：
+
+```bash
+pnpm dev:server
+pnpm dev:web
 ```
 
 运行服务端核心测试：

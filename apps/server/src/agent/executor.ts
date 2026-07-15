@@ -27,7 +27,7 @@ import { generateChat, generateText } from "../llm/provider.js";
 import {
   buildErrorSummaryPrompt,
   buildActionPlanPrompt,
-  buildFinalConclusionPrompt,
+  buildBusinessDecisionPrompt,
   buildPlanPrompt,
   buildToolCallingMessages,
 } from "../llm/prompts.js";
@@ -48,6 +48,11 @@ import {
   throwIfRunCancelled,
 } from "./runControl.js";
 import { deriveAgentOutcome } from "./outcome.js";
+import {
+  buildEvidencePacket,
+  enrichOutcomeWithBusinessDecision,
+  formatOutcomeConclusion,
+} from "./businessDecision.js";
 
 const STEP_DELAY_MS = 250;
 const MAX_TOOL_LOOP_TURNS = 10;
@@ -548,11 +553,12 @@ async function buildActionPlanStep(run: AgentRun, ticketContext: unknown, index:
 }
 
 function extractProcessTicketId(task: string) {
-  if (!/处理\s*工单\s*T-\d+/i.test(task)) {
-    return undefined;
-  }
+  const ticketIds = [...new Set(
+    [...task.matchAll(/T-\d+/gi)].map(([ticketId]) => ticketId.toUpperCase()),
+  )];
 
-  return task.match(/T-\d+/i)?.[0].toUpperCase();
+  // 恰好一个工单号即可安全预读取；多个工单号通常属于比较或批量查询，不强行收敛为单工单流程。
+  return ticketIds.length === 1 ? ticketIds[0] : undefined;
 }
 
 /** 处理单张工单前先读取真实详情，为 Planner 提供可靠上下文；该步骤保持只读。 */
@@ -789,22 +795,36 @@ export function parseAgentPlan(raw: string, allowEmpty = false): AgentPlan {
   return { version: 1, summary: candidate.summary, steps };
 }
 
-/** 对语义明确的规则查询做参数归一，避免模型用冗长或错误关键词制造无意义重试。 */
-function normalizeTaskAwareToolCall(task: string, toolCall: LlmToolCall): LlmToolCall {
+/**
+ * 依据用户任务与已读取工单共同归一规则关键词。
+ * 工单标题和描述属于可信业务上下文，可纠正模型在“执行工单 T-xxxx”这类短指令中误用 refund 的情况。
+ */
+export function normalizeTaskAwareToolCall(
+  task: string,
+  ticketContext: unknown,
+  toolCall: LlmToolCall,
+): LlmToolCall {
   if (toolCall.name !== "searchPolicy") {
     return toolCall;
   }
 
+  const evidence = `${task}\n${JSON.stringify(ticketContext ?? {})}`;
   let keyword: string | undefined;
-  if (/发票|开票/.test(task)) {
+  if (/重复.{0,6}退款|退款.{0,6}重复/i.test(evidence)) {
+    keyword = "duplicate-refund";
+  } else if (/高风险/i.test(evidence) && /关闭(?:投诉)?工单|关单/i.test(evidence)) {
+    keyword = "security";
+  } else if (/发票|开票/.test(evidence)) {
     keyword = "发票";
-  } else if (/升级/.test(task)) {
+  } else if (/升级/.test(evidence)) {
     keyword = "upgrade";
-  } else if (/SLA|服务不可用|不可用/i.test(task)) {
+  } else if (/SLA|服务不可用|不可用/i.test(evidence)) {
     keyword = "sla";
-  } else if (/取消|cancel/i.test(task)) {
+  } else if (/取消|cancel/i.test(evidence)) {
     keyword = "cancel";
-  } else if (/退款|refund/i.test(task)) {
+  } else if (/人工审批|人工确认|审批流程/i.test(evidence)) {
+    keyword = "approval";
+  } else if (/退款|refund/i.test(evidence)) {
     keyword = "refund";
   }
 
@@ -985,37 +1005,51 @@ export function ensureCompleteFinalConclusion(run: AgentRun, value: string) {
   ].join("\n");
 }
 
-/** 基于完整执行 trace 再生成一次面向用户的精简结论，避免把过程日志或评测指标暴露到最终回复。 */
+/** 基于可信事实包生成结构化业务判断；模型输出必须通过服务端证据与动作校验。 */
 async function buildFinalConclusionStep(run: AgentRun, index: number, candidate: string) {
-  const finalPrompt = buildFinalConclusionPrompt({
-    task: run.task,
+  const deterministicOutcome = deriveAgentOutcome(run);
+  const evidencePacket = buildEvidencePacket(run, deterministicOutcome);
+  const decisionPrompt = buildBusinessDecisionPrompt({
+    packet: evidencePacket,
+    deterministicConclusion: deterministicOutcome.conclusion,
     candidate,
-    steps: summarizeStepsForFinalPrompt(run.steps),
   });
-  const final = await measureStep(() =>
+  const decisionResult = await measureStep(() =>
     generateText({
-      ...finalPrompt,
+      ...decisionPrompt,
       temperature: 0.1,
       signal: getRunAbortSignal(run.id),
     }),
   );
 
-  recordLlmUsage(run, final.value.model, final.value.tokenUsage, Boolean(final.value.fallback));
-  const finalText = ensureCompleteFinalConclusion(run, final.value.text);
-  const usedStructureFallback = finalText !== final.value.text.trim();
+  recordLlmUsage(
+    run,
+    decisionResult.value.model,
+    decisionResult.value.tokenUsage,
+    Boolean(decisionResult.value.fallback),
+  );
+  const enrichedOutcome = enrichOutcomeWithBusinessDecision(
+    deterministicOutcome,
+    evidencePacket,
+    decisionResult.value.text,
+  );
+  // 先写入 run，终态 deriveAgentOutcome 会在可信 decision 未变化时保留这份已验证增强信息。
+  run.outcome = enrichedOutcome;
+  const finalText = formatOutcomeConclusion(enrichedOutcome);
+  const usedDeterministicFallback = enrichedOutcome.decisionSource === "deterministic_fallback";
 
   return createStep({
     index,
     type: "final",
-    title: usedStructureFallback
-      ? "生成最终回复（结构兜底）"
-      : final.value.isMock ? "生成最终回复（Mock LLM）" : "生成最终回复",
+    title: usedDeterministicFallback
+      ? "生成业务结论（确定性兜底）"
+      : decisionResult.value.isMock ? "生成结构化业务结论（Mock LLM）" : "生成结构化业务结论",
     detail: finalText,
-    durationMs: final.durationMs,
-    toolName: final.value.model,
-    modelName: final.value.model,
-    tokenUsage: final.value.tokenUsage,
-    fallback: final.value.fallback,
+    durationMs: decisionResult.durationMs,
+    toolName: decisionResult.value.model,
+    modelName: decisionResult.value.model,
+    tokenUsage: decisionResult.value.tokenUsage,
+    fallback: decisionResult.value.fallback,
     status: "completed",
   });
 }
@@ -1279,7 +1313,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
       let shouldAskModelToRecover = false;
 
       for (const rawToolCall of toolCalls) {
-        const toolCall = normalizeTaskAwareToolCall(run.task, rawToolCall);
+        const toolCall = normalizeTaskAwareToolCall(run.task, ticketContext?.ticket, rawToolCall);
         throwIfRunCancelled(run);
         try {
           if (!isAgentToolName(toolCall.name)) {

@@ -195,11 +195,25 @@ export function deriveAgentOutcome(run: AgentRun): AgentOutcome {
     decision = "read_only";
   }
 
-  return {
+  const deterministicOutcome: AgentOutcome = {
     decision,
     performedActions,
     evidence: collectEvidenceReferences(run.steps),
     userMessage: finalMessage ?? getDefaultUserMessage(run),
     conclusion: deriveConclusion(run, decision, performedActions),
   };
+
+  // final step 已写入且可信 decision 未变化时，保留通过服务端校验的模型推理与推荐。
+  const previousOutcome = run.outcome;
+  if (previousOutcome?.decisionSource && previousOutcome.decision === decision) {
+    return {
+      ...deterministicOutcome,
+      reasoning: previousOutcome.reasoning,
+      recommendation: previousOutcome.recommendation,
+      decisionSource: previousOutcome.decisionSource,
+      conclusion: previousOutcome.conclusion ?? deterministicOutcome.conclusion,
+    };
+  }
+
+  return deterministicOutcome;
 }

@@ -145,6 +145,9 @@ export function getOrder(orderId: string) {
 export function searchPolicy(keyword: string) {
   const normalizedKeyword = keyword.trim().toLowerCase();
   const policyAliases: Record<string, string> = {
+    "退款": "refund",
+    "人工审批": "approval",
+    "人工确认": "approval",
     "发票补开": "发票",
     "补开发票": "发票",
     "发票开具": "发票",
@@ -156,6 +159,10 @@ export function searchPolicy(keyword: string) {
     "升级咨询": "upgrade",
     "升级": "upgrade",
     "订单取消": "cancel",
+    "重复退款": "duplicate-refund",
+    "重复退款核查": "duplicate-refund",
+    "高风险关闭工单": "security",
+    "关闭工单": "security",
   };
   const aliasMatch = Object.entries(policyAliases)
     .sort(([left], [right]) => right.length - left.length)

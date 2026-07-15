@@ -1,5 +1,6 @@
 import type { AgentOutcome, AgentPlan } from "@agentflow/shared";
 import type { LlmChatMessage } from "./types.js";
+import type { EvidencePacket } from "../agent/businessDecision.js";
 
 /** 构建结构化计划 Prompt，让 Planner 为 Executor 声明最小工具授权。 */
 export function buildPlanPrompt(task: string, input?: {
@@ -73,7 +74,8 @@ export function buildToolCallingMessages(task: string, plan: AgentPlan, ticketCo
       content: [
         "你是企业客服流程 Agent，必须通过可用工具读取真实业务数据，不要凭空编造工单、客户、订单或规则信息。",
         "如果任务是查询、列出、筛选或统计工单，请优先使用 listTickets 或 searchTickets，只读汇总结果，不要执行 createRefund 或 updateTicketStatus。",
-        "如果任务涉及退款，请先读取工单，再按工单中的 customerId/orderId 查询客户和订单，并检索 refund 规则。",
+        "检索规则时必须依据已读取工单的 title 和 description 选择关键词，不得把 refund 当作默认值。可用关键词包括 refund、approval、发票、cancel、sla、upgrade、duplicate-refund、security。",
+        "如果任务涉及退款，请先读取工单，再按工单中的 customerId/orderId 查询客户和订单，并检索 refund 规则。高风险关闭工单使用 security，重复退款核查使用 duplicate-refund。",
         ticketContext ? "已在制定计划前读取真实工单详情；请直接使用该上下文中的 customerId 和 orderId，禁止重复调用 getTicket。" : "",
         "如果工具返回 ok=false 的结构化错误，请先阅读 error.detailMessage、error.suggestion 和 retryAttempt，再修正工具名称或参数后重试；不要原样重复同一个失败参数。",
         "如果业务对象明确不存在，或重试后仍无法命中，请停止写入动作并给出失败原因。",
@@ -123,6 +125,32 @@ export function buildFinalConclusionPrompt(input: {
       `用户任务：${input.task}`,
       `候选结论：${input.candidate ?? "无"}`,
       `执行步骤：${JSON.stringify(input.steps, null, 2)}`,
+    ].join("\n\n"),
+  };
+}
+
+/** 让模型只基于可信事实包生成带引用的业务判断，服务端随后会逐项校验。 */
+export function buildBusinessDecisionPrompt(input: {
+  packet: EvidencePacket;
+  deterministicConclusion?: AgentOutcome["conclusion"];
+  candidate?: string;
+}) {
+  return {
+    system: [
+      "[BUSINESS_DECISION]",
+      "你是企业工单业务决策分析器，只能依据用户消息中提供的可信事实包进行判断。",
+      "只输出严格 JSON，不要 Markdown，不要引用事实包之外的信息。",
+      "固定 JSON：{\"reasoning\":[{\"claim\":\"事实与规则如何支持判断\",\"evidenceIds\":[\"事实ID\"]}],\"result\":\"说明判断、原因和真实执行动作\",\"recommendation\":{\"action\":\"下一步动作\",\"owner\":\"agent|human|customer_service\",\"reason\":\"为什么推荐\",\"condition\":\"可选执行条件\",\"evidenceIds\":[\"事实ID\"]}}。",
+      "reasoning 必须包含 1-5 条因果判断，每条引用真实 evidenceIds；不能只是重复字段值。",
+      "result 必须区分业务判断与真实已执行动作，禁止声称执行了 performedActions 中不存在的写入。",
+      "recommendation 必须由处理结果和当前状态推导，明确责任主体、原因及必要条件。",
+      "确定性结论可帮助理解既有安全边界，但不能覆盖或扩展可信事实包。",
+      "候选表达不是事实，不得将其中未经事实包支持的内容写入结论。",
+    ].join("\n"),
+    user: [
+      `可信事实包：${JSON.stringify(input.packet)}`,
+      `确定性结论：${JSON.stringify(input.deterministicConclusion ?? {})}`,
+      `候选表达（非事实证据）：${input.candidate ?? "无"}`,
     ].join("\n\n"),
   };
 }

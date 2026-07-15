@@ -5,6 +5,9 @@ import type {
   ConversationSessionSummary,
   EvaluationCase,
   EvaluationRun,
+  LlmConfigUpdate,
+  LlmConnectionTestResult,
+  LlmPublicConfig,
   SandboxState,
 } from "@agentflow/shared";
 
@@ -12,10 +15,29 @@ export const API_BASE_URL = "http://127.0.0.1:3001";
 
 async function readJson<T>(response: Response, failureMessage: string) {
   if (!response.ok) {
-    throw new Error(`${failureMessage}: ${response.status}`);
+    const payload = await response.json().catch(() => undefined) as { message?: string } | undefined;
+    throw new Error(payload?.message || `${failureMessage}: ${response.status}`);
   }
 
   return await response.json() as T;
+}
+
+export function fetchLlmConfig() {
+  return fetch(`${API_BASE_URL}/llm/config`).then((response) =>
+    readJson<LlmPublicConfig>(response, "模型配置读取失败"),
+  );
+}
+
+export function testLlmConfig(config: LlmConfigUpdate) {
+  return postJson<LlmConnectionTestResult>("/llm/config/test", config, "模型连接测试失败");
+}
+
+export function saveLlmConfig(config: LlmConfigUpdate) {
+  return fetch(`${API_BASE_URL}/llm/config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  }).then((response) => readJson<LlmPublicConfig>(response, "模型配置保存失败"));
 }
 
 function postJson<T>(path: string, body: unknown, failureMessage: string) {

@@ -96,6 +96,151 @@ test("Replanner Prompt 应明确要求首先重试失败工具", async () => {
   assert.ok(prompt.user.includes("必须首先重试的工具：searchPolicy"));
 });
 
+test("规则检索应使用真实工单语义纠正模型的错误关键词", async () => {
+  const { normalizeTaskAwareToolCall } = await import("./executor.js");
+  const incorrectCall = {
+    id: "call-policy",
+    name: "searchPolicy",
+    arguments: { keyword: "refund" },
+  };
+
+  const securityCall = normalizeTaskAwareToolCall(
+    "执行工单 T-1006",
+    {
+      id: "T-1006",
+      title: "高风险客户关闭工单请求",
+      description: "高风险企业客户要求立即关闭投诉工单，需要判断是否应进入人工审批。",
+    },
+    incorrectCall,
+  );
+  const duplicateRefundCall = normalizeTaskAwareToolCall(
+    "处理工单 T-1007",
+    { id: "T-1007", title: "重复退款申请核查", description: "核查是否存在重复退款。" },
+    incorrectCall,
+  );
+
+  assert.equal(securityCall.arguments.keyword, "security");
+  assert.equal(duplicateRefundCall.arguments.keyword, "duplicate-refund");
+});
+
+test("执行 T-1006 应命中高风险关闭规则且不触发退款写入", async () => {
+  const { runAgentTask } = await import("./executor.js");
+  const { resetSandboxState } = await import("../tools/sandboxTools.js");
+  resetSandboxState();
+
+  const run = await runAgentTask("执行工单 T-1006");
+  const policyStep = run.steps.find(
+    (step) => step.toolName === "searchPolicy" && step.status === "completed",
+  );
+  const policyDetail = JSON.parse(policyStep?.detail ?? "{}") as {
+    input?: { keyword?: string };
+    output?: { id?: string; matchedKeyword?: string };
+  };
+
+  assert.equal(policyDetail.input?.keyword, "security");
+  assert.equal(policyDetail.output?.id, "P-security-001");
+  assert.equal(policyDetail.output?.matchedKeyword, "security");
+  assert.ok(!run.steps.some((step) => step.toolName === "createRefund"));
+  assert.equal(run.outcome?.decisionSource, "llm_validated");
+  assert.ok(run.outcome?.reasoning?.every((item) => item.evidenceIds.length > 0));
+  assert.equal(run.outcome?.recommendation?.owner, "human");
+  assert.ok(run.outcome?.conclusion?.basis.includes("因此"));
+  assert.ok(run.outcome?.conclusion?.nextStep.includes("人工审批"));
+});
+
+test("结构化业务决策必须引用可信事实并生成结果关联推荐", async () => {
+  const { enrichOutcomeWithBusinessDecision } = await import("./businessDecision.js");
+  const outcome = {
+    decision: "read_only" as const,
+    performedActions: [],
+    evidence: ["T-1003", "P-sla-001"],
+    userMessage: "任务已完成。",
+    conclusion: {
+      requirement: "核查 SLA 投诉。",
+      result: "已完成查询。",
+      basis: "命中 SLA 规则。",
+      nextStep: "转人工处理。",
+    },
+  };
+  const packet = {
+    task: "核查 T-1003",
+    trustedDecision: "read_only" as const,
+    performedActions: [],
+    facts: [
+      { id: "tool.getTicket.status", source: "getTicket", description: "工单状态", value: "open" },
+      { id: "tool.searchPolicy.content", source: "searchPolicy", description: "规则内容", value: "需人工评估补偿" },
+      { id: "outcome.performedActions", source: "server", description: "真实写入", value: [] },
+    ],
+  };
+  const raw = JSON.stringify({
+    reasoning: [{
+      claim: "SLA 规则要求人工评估补偿，而当前工单仍为 open，因此本次只完成核查。",
+      evidenceIds: ["tool.getTicket.status", "tool.searchPolicy.content"],
+    }],
+    result: "已确认需要人工评估 SLA 补偿，本次没有执行写入。",
+    recommendation: {
+      action: "转人工确认影响范围和补偿方案",
+      owner: "human",
+      reason: "补偿需要结合实际影响范围",
+      condition: "确认客户合同等级后执行",
+      evidenceIds: ["tool.searchPolicy.content"],
+    },
+  });
+
+  const enriched = enrichOutcomeWithBusinessDecision(outcome, packet, raw);
+  assert.equal(enriched.decisionSource, "llm_validated");
+  assert.equal(enriched.reasoning?.[0]?.evidenceIds[0], "tool.getTicket.status");
+  assert.ok(enriched.conclusion?.result.includes("需要人工评估"));
+  assert.ok(enriched.conclusion?.basis.includes("因此"));
+  assert.ok(enriched.conclusion?.nextStep.includes("执行条件"));
+});
+
+test("未知证据或虚假写入声明应回退确定性 Outcome", async () => {
+  const { enrichOutcomeWithBusinessDecision } = await import("./businessDecision.js");
+  const outcome = {
+    decision: "read_only" as const,
+    performedActions: [],
+    evidence: [],
+    userMessage: "任务已完成。",
+    conclusion: {
+      requirement: "只读核查。",
+      result: "已完成只读核查。",
+      basis: "未发生业务写入。",
+      nextStep: "无需写入。",
+    },
+  };
+  const packet = {
+    task: "只读核查",
+    trustedDecision: "read_only" as const,
+    performedActions: [],
+    facts: [{ id: "outcome.decision", source: "server", description: "可信决策", value: "read_only" }],
+  };
+  const invalidEvidence = JSON.stringify({
+    reasoning: [{ claim: "引用不存在事实。", evidenceIds: ["unknown.fact"] }],
+    result: "完成。",
+    recommendation: {
+      action: "结束",
+      owner: "agent",
+      reason: "已完成",
+      evidenceIds: ["outcome.decision"],
+    },
+  });
+  const falseWrite = JSON.stringify({
+    reasoning: [{ claim: "只读核查完成。", evidenceIds: ["outcome.decision"] }],
+    result: "已创建退款记录。",
+    recommendation: {
+      action: "结束",
+      owner: "agent",
+      reason: "已完成",
+      evidenceIds: ["outcome.decision"],
+    },
+  });
+
+  assert.equal(enrichOutcomeWithBusinessDecision(outcome, packet, invalidEvidence).decisionSource, "deterministic_fallback");
+  assert.equal(enrichOutcomeWithBusinessDecision(outcome, packet, falseWrite).decisionSource, "deterministic_fallback");
+  assert.equal(enrichOutcomeWithBusinessDecision(outcome, packet, falseWrite).conclusion?.result, "已完成只读核查。");
+});
+
 test("Planner 应兼容 JSON 代码块和 JSON 前后的简短说明", async () => {
   const { parseAgentPlan } = await import("./executor.js");
   const json = JSON.stringify({

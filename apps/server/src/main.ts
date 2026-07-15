@@ -2,6 +2,8 @@ import cors from "@fastify/cors";
 import Fastify from "fastify";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AgentRunEvent, ConversationMessage } from "@agentflow/shared";
+import type { LlmConfigUpdate, LlmConnectionTestResult } from "@agentflow/shared";
+import { z } from "zod";
 import { getPendingApprovalByRun, resolveApprovalForRun } from "./approval/approvalStore.js";
 import { getAgentErrorHttpStatus, normalizeAgentError } from "./agent/errors.js";
 import { runAgentTask, streamAgentTask } from "./agent/executor.js";
@@ -21,6 +23,8 @@ import { clearEvaluationRuns, getEvaluationRun, listEvaluationRuns } from "./eva
 import { clearRuns, getRun, listRuns } from "./trace/runStore.js";
 import { getSandboxState, resetSandboxState } from "./tools/sandboxTools.js";
 import { getPersistenceHealth } from "./storage/persistentState.js";
+import { createLlmConfigCandidate, getPublicLlmConfig, updateLlmConfig } from "./llm/config.js";
+import { testLlmConnection } from "./llm/provider.js";
 
 /** 普通执行接口的请求体，主要用于非流式调试。 */
 interface RunAgentBody {
@@ -66,6 +70,18 @@ interface EvaluationRunParams {
   evaluationRunId: string;
 }
 
+const llmConfigSchema = z.object({
+  provider: z.enum(["mock", "openai-compatible"]),
+  baseUrl: z.string().trim().url().max(500),
+  model: z.string().trim().min(1).max(200),
+  apiKey: z.string().max(1_000).optional(),
+  clearApiKey: z.boolean().optional(),
+  mock: z.boolean(),
+  fallbackOnError: z.boolean(),
+  requestTimeoutMs: z.number().int().min(1_000).max(300_000),
+  maxRetries: z.number().int().min(0).max(10),
+}).strict();
+
 const app = Fastify({ logger: true });
 
 /** 所有非 SSE 路由统一返回结构化错误，避免 Fastify 默认响应泄露内部异常文本。 */
@@ -88,6 +104,38 @@ await app.register(cors, {
 
 /** 健康检查接口，用于确认后端服务是否已经启动。 */
 app.get("/health", async () => ({ ok: true, persistence: getPersistenceHealth() }));
+
+/** 获取脱敏后的当前模型配置，任何情况下都不向浏览器返回 API Key。 */
+app.get("/llm/config", async () => getPublicLlmConfig());
+
+/** 使用尚未保存的候选配置测试真实模型连接，Mock 模式只验证本地配置。 */
+app.post<{ Body: LlmConfigUpdate }>("/llm/config/test", async (request): Promise<LlmConnectionTestResult> => {
+  const input = llmConfigSchema.parse(request.body);
+  const config = createLlmConfigCandidate(input);
+  const result = await testLlmConnection(config);
+
+  return {
+    ok: true,
+    provider: config.provider,
+    model: config.model,
+    mode: result.mode,
+    latencyMs: result.latencyMs,
+    message: result.mode === "mock" ? "Mock 模式可用" : "模型连接成功",
+  };
+});
+
+/** 保存当前进程的模型配置；前端会在执行期间禁止调用，避免一个 Run 中途换模型。 */
+app.put<{ Body: LlmConfigUpdate }>("/llm/config", async (request, reply) => {
+  const input = llmConfigSchema.parse(request.body);
+  const hasActiveRun = listRuns().some((run) => run.status === "running" || run.status === "waiting_approval");
+  const hasActiveEvaluation = listEvaluationRuns().some((run) => run.status === "running");
+
+  if (hasActiveRun || hasActiveEvaluation) {
+    return reply.code(409).send({ message: "当前有任务正在执行，结束后才能切换模型配置。" });
+  }
+
+  return updateLlmConfig(input);
+});
 
 /** 沙箱状态接口，前端用它展示 Agent 工具调用后的业务状态变化。 */
 app.get("/sandbox/state", async () => getSandboxState());

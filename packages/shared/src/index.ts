@@ -9,6 +9,41 @@ export interface LlmTokenUsage {
   totalTokens: number;
 }
 
+/** 前端可读取的模型配置不包含 API Key 明文。 */
+export interface LlmPublicConfig {
+  provider: "mock" | "openai-compatible";
+  baseUrl: string;
+  model: string;
+  mock: boolean;
+  fallbackOnError: boolean;
+  requestTimeoutMs: number;
+  maxRetries: number;
+  apiKeyConfigured: boolean;
+  source: "environment" | "runtime";
+}
+
+/** 更新模型配置时，空 apiKey 表示保留现有密钥。 */
+export interface LlmConfigUpdate {
+  provider: LlmPublicConfig["provider"];
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  clearApiKey?: boolean;
+  mock: boolean;
+  fallbackOnError: boolean;
+  requestTimeoutMs: number;
+  maxRetries: number;
+}
+
+export interface LlmConnectionTestResult {
+  ok: true;
+  provider: LlmPublicConfig["provider"];
+  model: string;
+  mode: "mock" | "real";
+  latencyMs: number;
+  message: string;
+}
+
 export interface AgentRunMetrics {
   llmCallCount: number;
   toolCallCount: number;
@@ -44,11 +79,29 @@ export type AgentOutcomeDecision =
   | "failed"
   | "cancelled";
 
+/** 经服务端校验的模型推理，每个判断必须引用可信事实 ID。 */
+export interface AgentOutcomeReasoning {
+  claim: string;
+  evidenceIds: string[];
+}
+
+/** 基于处理结果生成的后续建议，owner 明确下一步责任主体。 */
+export interface AgentOutcomeRecommendation {
+  action: string;
+  owner: "agent" | "human" | "customer_service";
+  reason: string;
+  condition?: string;
+  evidenceIds: string[];
+}
+
 export interface AgentOutcome {
   decision: AgentOutcomeDecision;
   performedActions: string[];
   evidence: string[];
   userMessage: string;
+  reasoning?: AgentOutcomeReasoning[];
+  recommendation?: AgentOutcomeRecommendation;
+  decisionSource?: "llm_validated" | "deterministic_fallback";
   /** 前端固定四栏直接消费的可信业务摘要，由服务端工具轨迹派生。 */
   conclusion?: {
     requirement: string;

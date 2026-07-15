@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
-import type { AgentRun, ConversationMessage } from "@agentflow/shared";
+import type { AgentRun, ConversationMessage, LlmPublicConfig } from "@agentflow/shared";
 import { formatRunTime } from "../utils/format";
 import { getRunStatusLabel } from "../utils/labels";
 import { getFinalStepMessage, getTraceSteps } from "../utils/trace";
@@ -13,6 +13,7 @@ type UiStatus = AgentRun["status"] | "idle";
 defineProps<{
   messages: ConversationMessage[];
   draft: string;
+  taskPlaceholder: string;
   status: UiStatus;
   statusLabel: string;
   isBusy: boolean;
@@ -20,6 +21,7 @@ defineProps<{
   canRetryLastTask: boolean;
   resolvingApproval: boolean;
   cancellingRun: boolean;
+  modelConfig?: LlmPublicConfig;
 }>();
 
 const emit = defineEmits<{
@@ -28,10 +30,28 @@ const emit = defineEmits<{
   cancel: [];
   retry: [];
   resolveApproval: [action: "approve" | "reject", messageId: string];
+  openSettings: [];
 }>();
 
 const conversationEl = ref<HTMLElement>();
 const composerInput = ref<HTMLTextAreaElement>();
+const starterTasks = [
+  {
+    eyebrow: "退款处理",
+    title: "判断并处理退款申请",
+    task: "处理工单 T-1001：判断客户是否符合退款规则，必要时创建退款并更新工单状态。",
+  },
+  {
+    eyebrow: "服务核查",
+    title: "核查企业客户 SLA 投诉",
+    task: "查询工单 T-1003 的客户、订单与适用规则，给出 SLA 核查结果和补偿建议，不执行写入操作。",
+  },
+  {
+    eyebrow: "批量查询",
+    title: "汇总高优先级待处理工单",
+    task: "查询所有 open 状态的高优先级工单，汇总工单号、客户名称和当前业务状态。",
+  },
+];
 
 function scrollToBottom() {
   void nextTick(() => {
@@ -43,6 +63,12 @@ function scrollToBottom() {
 
 function focusComposer() {
   void nextTick(() => composerInput.value?.focus());
+}
+
+/** 快捷任务只写入编辑器，由用户确认后再触发 Agent run。 */
+function selectStarterTask(task: string) {
+  emit("update:draft", task);
+  focusComposer();
 }
 
 function handleComposerKeydown(event: KeyboardEvent) {
@@ -89,13 +115,61 @@ defineExpose({
         <p class="eyebrow muted">Conversation Workspace</p>
         <h2>会话式执行工作台</h2>
       </div>
-      <span class="status-pill" :class="`status-${status}`">{{ statusLabel }}</span>
+      <div class="workspace-header-controls">
+        <button class="model-config-trigger" type="button" @click="$emit('openSettings')">
+          <span class="model-config-dot" :class="{ active: modelConfig?.apiKeyConfigured || modelConfig?.mock }"></span>
+          <span>
+            <small>当前模型</small>
+            <strong>{{ modelConfig?.model ?? "读取中…" }}</strong>
+          </span>
+          <span aria-hidden="true">⚙</span>
+        </button>
+        <span class="status-pill" :class="`status-${status}`">{{ statusLabel }}</span>
+      </div>
     </header>
 
     <div ref="conversationEl" class="conversation-list">
-      <div v-if="messages.length === 0" class="empty-state">
-        发送一条任务开始会话。每条用户消息都会触发一次 Agent run，执行 trace 会挂在对应的 Agent 回复下方。
-      </div>
+      <section v-if="messages.length === 0" class="conversation-empty-state" aria-label="开始 Agent 任务">
+        <div class="empty-state-intro">
+          <span class="empty-state-kicker">Ready for a run</span>
+          <h3>把业务目标交给 Agent，<br />每一步都有据可查</h3>
+          <p>
+            输入工单号和期望结果即可开始。Agent 会读取业务上下文、制定方案，并在需要写入或审批时明确展示操作。
+          </p>
+
+          <ol class="run-preview" aria-label="Agent 执行流程">
+            <li><span>01</span><strong>读取上下文</strong></li>
+            <li><span>02</span><strong>制定方案</strong></li>
+            <li><span>03</span><strong>调用工具</strong></li>
+            <li><span>04</span><strong>生成结论</strong></li>
+          </ol>
+        </div>
+
+        <div class="starter-task-panel">
+          <div class="starter-task-heading">
+            <div>
+              <span class="state-label">任务模板</span>
+              <strong>从常见场景开始</strong>
+            </div>
+            <small>点击后可继续编辑</small>
+          </div>
+
+          <button
+            v-for="(starter, index) in starterTasks"
+            :key="starter.title"
+            type="button"
+            class="starter-task"
+            @click="selectStarterTask(starter.task)"
+          >
+            <span class="starter-task-index">0{{ index + 1 }}</span>
+            <span>
+              <small>{{ starter.eyebrow }}</small>
+              <strong>{{ starter.title }}</strong>
+            </span>
+            <span class="starter-task-arrow" aria-hidden="true">→</span>
+          </button>
+        </div>
+      </section>
 
       <article
         v-for="message in messages"
@@ -144,14 +218,21 @@ defineExpose({
     </div>
 
     <div class="composer">
-      <textarea
-        ref="composerInput"
-        :value="draft"
-        aria-label="任务输入"
-        placeholder="输入下一条任务，例如：处理工单 T-1001..."
-        @input="$emit('update:draft', ($event.target as HTMLTextAreaElement).value)"
-        @keydown="handleComposerKeydown"
-      />
+      <div class="composer-input-shell">
+        <div class="composer-label-row">
+          <label for="agent-task-composer">任务指令</label>
+          <span>Ctrl / ⌘ + Enter 发送</span>
+        </div>
+        <textarea
+          id="agent-task-composer"
+          ref="composerInput"
+          :value="draft"
+          aria-label="任务输入"
+          :placeholder="taskPlaceholder"
+          @input="$emit('update:draft', ($event.target as HTMLTextAreaElement).value)"
+          @keydown="handleComposerKeydown"
+        />
+      </div>
       <div class="composer-actions">
         <button type="button" :disabled="isBusy || !draft.trim()" @click="$emit('send')">
           {{ isRunning ? "执行中..." : status === "waiting_approval" ? "等待审批" : "发送" }}
