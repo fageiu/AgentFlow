@@ -78,6 +78,7 @@ function throwIfRequestAborted(signal?: AbortSignal) {
   throw new Error("LLM request was aborted.");
 }
 
+/** 请求超时处理  */
 function createAttemptSignal(externalSignal: AbortSignal | undefined, timeoutMs: number) {
   const controller = new AbortController();
   const abortFromExternal = () => controller.abort(externalSignal?.reason);
@@ -171,7 +172,7 @@ async function requestChatCompletion(config: LlmConfig, body: Record<string, unk
       if (!canRetry) {
         throw providerError;
       }
-
+      // 指数退避重试
       const retryAfterMs = providerError.agentError.details?.retryAfterMs;
       const delayMs = typeof retryAfterMs === "number"
         ? Math.min(retryAfterMs, 10_000)
@@ -755,6 +756,7 @@ function parseToolCallArguments(raw: string | undefined) {
   return parsed as Record<string, unknown>;
 }
 
+/** 解析大模型的tool_calls工具调用 */
 function parseAssistantMessage(data: ChatCompletionResponse): GenerateChatResult["message"] {
   const message = data.choices?.[0]?.message;
 

@@ -125,6 +125,7 @@ function findPreviousCompletedEvaluationRun() {
   return listEvaluationRuns().find((run) => run.status === "completed");
 }
 
+/** 获取回归状态 */
 function getRegressionStatus(
   current: EvaluationCaseResult,
   previousRun: EvaluationRun | undefined,
