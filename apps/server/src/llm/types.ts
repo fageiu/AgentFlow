@@ -1,4 +1,4 @@
-import type { LlmTokenUsage } from "@agentflow/shared";
+import type { AgentPlan, AgentPlanStep, LlmTokenUsage } from "@agentflow/shared";
 
 /** 当前支持的 LLM Provider 类型。 */
 export type LlmProvider = "mock" | "openai-compatible";
@@ -51,6 +51,13 @@ export interface GenerateTextInput {
 export interface GenerateChatInput {
   messages: LlmChatMessage[];
   tools?: LlmToolDefinition[];
+  /** Mock 和 Executor 共享结构化状态，不允许再从 Prompt 文案反向解析业务上下文。 */
+  executionContext?: {
+    task: string;
+    ticketContext?: unknown;
+    plan: AgentPlan;
+    activePlanStep?: AgentPlanStep;
+  };
   temperature?: number;
   signal?: AbortSignal;
 }

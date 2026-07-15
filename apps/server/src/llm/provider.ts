@@ -530,26 +530,6 @@ function parseToolOutput(messages: LlmChatMessage[], name: string): Record<strin
   }
 }
 
-/** 预读取的工单上下文会随初始消息传入，Mock 也必须使用它避免重复 getTicket。 */
-function parsePreloadedTicketContext(messages: LlmChatMessage[]) {
-  const userMessage = messages.find((item) => item.role === "user");
-  if (!userMessage || userMessage.role !== "user") {
-    return undefined;
-  }
-
-  const raw = userMessage.content.match(/预读取工单上下文：(\{[\s\S]*?\})\n\nPlanner 计划：/)?.[1];
-  if (!raw) {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return isRecord(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function parseToolOutputArray(messages: LlmChatMessage[], name: string): Array<Record<string, unknown>> | undefined {
   const message = [...messages].reverse().find((item) => item.role === "tool" && item.name === name);
 
@@ -579,11 +559,6 @@ function hasToolOutput(messages: LlmChatMessage[], name: string) {
   });
 }
 
-/** Action Planner 追加动作后，Mock 必须服从当前计划而非只看初始用户措辞。 */
-function hasPlannedAction(messages: LlmChatMessage[], toolName: string) {
-  return messages.some((message) => message.role === "system" && message.content.includes(`\"${toolName}\"`));
-}
-
 function getLastToolError(messages: LlmChatMessage[], name: string) {
   const message = [...messages].reverse().find((item) => item.role === "tool" && item.name === name);
 
@@ -601,16 +576,11 @@ function getLastToolError(messages: LlmChatMessage[], name: string) {
 
 function extractUserTask(messages: LlmChatMessage[]) {
   const userMessage = [...messages].reverse().find((item) => item.role === "user");
-  if (userMessage?.role !== "user") {
-    return "";
-  }
-
-  // 初始消息还会携带 Planner 计划和预读取上下文；意图判断只能使用用户原始任务行。
-  return userMessage.content.match(/用户任务：\s*([^\n]+)/)?.[1] ?? userMessage.content;
+  return userMessage?.role === "user" ? userMessage.content : "";
 }
 
-function extractTicketIdFromMessages(messages: LlmChatMessage[]) {
-  return extractUserTask(messages).match(/T-\d+/i)?.[0].toUpperCase() ?? "T-1001";
+function extractTicketId(task: string) {
+  return task.match(/T-\d+/i)?.[0].toUpperCase() ?? "T-1001";
 }
 
 function isTicketQueryTask(task: string) {
@@ -621,14 +591,14 @@ function isRefundTask(task: string) {
   return /退款|refund/i.test(task) && !/发票|升级|合同升级|咨询/.test(task);
 }
 
-function createPolicyKeyword(task: string, messages: LlmChatMessage[]) {
+function createPolicyKeyword(task: string, messages: LlmChatMessage[], ticketContext?: unknown) {
   const lastPolicyError = getLastToolError(messages, "searchPolicy");
-  // 只使用用户任务和工具观察作为业务证据；system prompt 中的示例词不能参与场景分类。
+  // 只使用结构化任务、工单上下文和工具观察；Prompt 示例词不能参与场景分类。
   const businessEvidence = messages
-    .filter((message) => message.role === "user" || message.role === "tool")
+    .filter((message) => message.role === "tool")
     .map((message) => message.content ?? "")
     .join("\n");
-  const evidence = `${task}\n${businessEvidence}`;
+  const evidence = `${task}\n${JSON.stringify(ticketContext ?? {})}\n${businessEvidence}`;
 
   if (lastPolicyError && /升级/.test(evidence)) {
     return "upgrade";
@@ -706,7 +676,7 @@ function formatTicketList(tickets: Array<Record<string, unknown>> | undefined) {
 
 /** Mock Tool Calling 会读取上一轮工具输出，模拟模型逐步决定下一次工具调用。 */
 function buildMockChatMessage(input: GenerateChatInput, errorMessage?: string): GenerateChatResult["message"] {
-  const task = extractUserTask(input.messages);
+  const task = input.executionContext?.task ?? extractUserTask(input.messages);
   const isQueryTask = isTicketQueryTask(task);
 
   if (isQueryTask) {
@@ -731,11 +701,15 @@ function buildMockChatMessage(input: GenerateChatInput, errorMessage?: string): 
     };
   }
 
-  const requestedTicketId = extractTicketIdFromMessages(input.messages);
-  const ticket = parseToolOutput(input.messages, "getTicket") ?? parsePreloadedTicketContext(input.messages);
+  const requestedTicketId = extractTicketId(task);
+  const preloadedTicket = isRecord(input.executionContext?.ticketContext)
+    ? input.executionContext.ticketContext
+    : undefined;
+  const ticket = parseToolOutput(input.messages, "getTicket") ?? preloadedTicket;
   const order = parseToolOutput(input.messages, "getOrder");
-  const policyKeyword = createPolicyKeyword(task, input.messages);
-  const shouldWriteRefund = isRefundTask(task) || hasPlannedAction(input.messages, "createRefund");
+  const policyKeyword = createPolicyKeyword(task, input.messages, preloadedTicket);
+  const shouldWriteRefund = isRefundTask(task)
+    || Boolean(input.executionContext?.plan.steps.some((step) => step.allowedTools.includes("createRefund")));
 
   // 工单可能已在 Planner 前预读取并作为上下文传入，此时无需重复调用 getTicket。
   if (!ticket) {

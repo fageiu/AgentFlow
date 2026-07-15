@@ -834,12 +834,34 @@ export function normalizeTaskAwareToolCall(
 }
 
 /** 将当前计划位置写入模型上下文，同时让 trace 能据此审计每一步实际授权范围。 */
-function buildPlanProgressMessage(activeStep: AgentPlanStep | undefined): LlmChatMessage {
+function buildPlanProgressMessage(activeStep: AgentPlanStep | undefined, activePlan: AgentPlan): LlmChatMessage {
   return {
     role: "system",
     content: activeStep
-      ? `当前计划步骤：${activeStep.id}（${activeStep.title}）。目标：${activeStep.objective}。本轮仅允许调用：${activeStep.allowedTools.join(", ")}。`
+      ? `服务端当前有效计划：${JSON.stringify(activePlan)}\n当前步骤：${activeStep.id}（${activeStep.title}）。目标：${activeStep.objective}。本轮仅允许调用：${activeStep.allowedTools.join(", ")}。此状态覆盖此前任何计划描述。`
       : "Planner 的全部步骤已经完成。禁止继续调用工具，请输出最终结论。",
+  };
+}
+
+/** 为单轮调用追加最新计划状态，但不污染可持续累积的工具对话历史。 */
+export function buildCurrentTurnMessages(
+  messages: LlmChatMessage[],
+  activeStep: AgentPlanStep | undefined,
+  activePlan: AgentPlan,
+) {
+  return [...messages, buildPlanProgressMessage(activeStep, activePlan)];
+}
+
+/** 先归一化模型参数，再把 assistant.tool_calls 写入历史，保证上下文与真实执行一致。 */
+export function buildAssistantExecutionMessage(
+  task: string,
+  ticketContext: unknown,
+  message: { content?: string; toolCalls?: LlmToolCall[] },
+): LlmChatMessage {
+  return {
+    role: "assistant",
+    content: message.content,
+    toolCalls: message.toolCalls?.map((toolCall) => normalizeTaskAwareToolCall(task, ticketContext, toolCall)),
   };
 }
 
@@ -1238,7 +1260,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
   throwIfRunCancelled(run);
 
   const tools = listAgentTools();
-  const messages = buildToolCallingMessages(run.task, activePlan, ticketContext?.ticket);
+  const messages = buildToolCallingMessages(run.task, ticketContext?.ticket);
   const retryAttemptsByTool = new Map<string, number>();
   let pendingRecovery: PendingToolRecovery | undefined;
   let activePlanStepIndex = 0;
@@ -1266,10 +1288,6 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
           steps: [...activePlan.steps, ...actionPlan.plan.steps],
         };
         run.plan = activePlan;
-        messages.push({
-          role: "system",
-          content: `已基于真实核查证据追加后续动作计划：${JSON.stringify(actionPlan.plan)}`,
-        });
         activePlanStep = activePlan.steps[activePlanStepIndex];
       }
     }
@@ -1285,35 +1303,37 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
       return;
     }
 
-    messages.push(buildPlanProgressMessage(activePlanStep));
+    // 当前计划状态只对本轮生效，不写入长期历史，避免旧步骤以 system 角色不断累积。
+    const currentTurnMessages = buildCurrentTurnMessages(messages, activePlanStep, activePlan);
     // 每轮只向模型暴露当前步骤授权的工具，避免依赖文字提示阻止越权调用。
     const activeTools = tools.filter((tool) => activePlanStep?.allowedTools.includes(tool.name));
     const assistant = await measureStep(() =>
       generateChat({
-        messages,
+        messages: currentTurnMessages,
         tools: activeTools,
+        executionContext: {
+          task: run.task,
+          ticketContext: ticketContext?.ticket,
+          plan: activePlan,
+          activePlanStep,
+        },
         temperature: 0.2,
         signal: getRunAbortSignal(run.id),
       }),
     );
     recordLlmUsage(run, assistant.value.model, assistant.value.tokenUsage, Boolean(assistant.value.fallback));
-    const toolCalls = assistant.value.message.toolCalls ?? [];
-
-    messages.push({
-      role: "assistant",
-      content: assistant.value.message.content,
-      toolCalls,
-    });
+    const assistantMessage = buildAssistantExecutionMessage(run.task, ticketContext?.ticket, assistant.value.message);
+    const toolCalls = assistantMessage.role === "assistant" ? assistantMessage.toolCalls ?? [] : [];
 
     // llm调用工具
     if (toolCalls.length > 0) {
       if (toolCalls.length > 1) {
         throw new Error("Executor accepts one tool call per planned step.");
       }
+      messages.push(assistantMessage);
       let shouldAskModelToRecover = false;
 
-      for (const rawToolCall of toolCalls) {
-        const toolCall = normalizeTaskAwareToolCall(run.task, ticketContext?.ticket, rawToolCall);
+      for (const toolCall of toolCalls) {
         throwIfRunCancelled(run);
         try {
           if (!isAgentToolName(toolCall.name)) {
@@ -1423,10 +1443,6 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
               steps: [...completedPlanSteps, ...replanned.plan.steps],
             };
             run.plan = activePlan;
-            messages.push({
-              role: "system",
-              content: `Planner 已根据工具观察更新剩余步骤：${JSON.stringify(replanned.plan)}`,
-            });
             yield addStep(run, replanned.step);
             // 加锁：待恢复，工具调用失败需重试，不允许生成最终结论
             pendingRecovery = {
@@ -1463,6 +1479,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
 
     // 生成最终结论
     if (assistant.value.message.content) {
+      messages.push(assistantMessage);
       throwIfRunCancelled(run);
       if (activePlanStep) {
         yield addStep(
