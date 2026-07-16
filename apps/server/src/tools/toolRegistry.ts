@@ -8,10 +8,10 @@ import {
   getTicket,
   listTickets,
   resetSandboxState,
-  searchPolicy,
   searchTickets,
   updateTicketStatus,
 } from "./sandboxTools.js";
+import { searchPolicyKnowledge, type RagRequestContext } from "../knowledge/ragClient.js";
 
 export type ToolRiskLevel = "read" | "write" | "high";
 
@@ -21,7 +21,7 @@ export interface SandboxToolDefinition {
   riskLevel: ToolRiskLevel;
   inputSchema: z.ZodType<unknown>;
   jsonSchema: JsonObjectSchema;
-  execute(input: unknown): unknown;
+  execute(input: unknown, context?: RagRequestContext): unknown | Promise<unknown>;
 }
 
 const getTicketInputSchema = z.object({
@@ -45,6 +45,7 @@ const getOrderInputSchema = z.object({
 
 const searchPolicyInputSchema = z.object({
   keyword: z.string(),
+  query: z.string().min(2).optional(),
 });
 
 const updateTicketStatusInputSchema = z.object({
@@ -120,6 +121,10 @@ const jsonSchemas = {
       keyword: {
         type: "string",
         description: "规则关键词，必须依据工单诉求选择：refund、approval、发票、cancel、sla、upgrade、duplicate-refund 或 security。",
+      },
+      query: {
+        type: "string",
+        description: "可选自然语言检索问题；Executor 会结合用户任务和可信工单上下文补全。",
       },
     },
     required: ["keyword"],
@@ -207,13 +212,13 @@ export const toolRegistry = {
   },
   searchPolicy: {
     name: "searchPolicy",
-    description: "根据关键词检索业务规则。",
+    description: "使用自然语言和关键词提示检索企业政策知识库，返回可信来源引用和 Top-K 节点。",
     riskLevel: "read",
     inputSchema: searchPolicyInputSchema,
     jsonSchema: jsonSchemas.searchPolicy,
-    execute(input) {
+    execute(input, context) {
       const parsed = searchPolicyInputSchema.parse(input);
-      return searchPolicy(parsed.keyword);
+      return searchPolicyKnowledge(parsed, context);
     },
   },
   updateTicketStatus: {
@@ -309,10 +314,10 @@ export function listAgentTools(): LlmToolDefinition[] {
 }
 
 /** 统一执行工具：先用 schema 校验入参，再调用具体业务函数。 */
-export function runTool(name: ToolName, input: unknown) {
+export async function runTool(name: ToolName, input: unknown, context?: RagRequestContext) {
   const tool = toolRegistry[name];
   const parsedInput = tool.inputSchema.parse(input);
-  const output = tool.execute(parsedInput);
+  const output = await tool.execute(parsedInput, context);
 
   return {
     tool,

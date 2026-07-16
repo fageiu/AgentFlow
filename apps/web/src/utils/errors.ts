@@ -20,6 +20,10 @@ const errorTitleMap: Record<string, string> = {
   AGENT_LOOP_LIMIT_EXCEEDED: "执行轮次超限",
   AGENT_INTERNAL_ERROR: "Agent 内部异常",
   STORAGE_WRITE_ERROR: "运行状态持久化失败",
+  KNOWLEDGE_SERVICE_UNAVAILABLE: "政策知识库服务不可用",
+  KNOWLEDGE_INDEX_NOT_READY: "政策知识库索引未就绪",
+  KNOWLEDGE_NO_MATCH: "没有可靠政策依据",
+  KNOWLEDGE_DOCUMENT_INVALID: "政策文档数据无效",
 };
 
 const errorAdviceMap: Record<string, string> = {
@@ -33,6 +37,10 @@ const errorAdviceMap: Record<string, string> = {
   AGENT_LOOP_LIMIT_EXCEEDED: "请缩小任务范围，或补充更明确的业务约束后重试。",
   AGENT_INTERNAL_ERROR: "请查看失败步骤和服务端日志定位未归类异常。",
   STORAGE_WRITE_ERROR: "请检查服务端数据目录权限、磁盘空间或文件占用情况。",
+  KNOWLEDGE_SERVICE_UNAVAILABLE: "请检查 RAG 服务、数据库与网络状态，恢复后重试。",
+  KNOWLEDGE_INDEX_NOT_READY: "请等待知识库完成模型加载和索引初始化后重试。",
+  KNOWLEDGE_NO_MATCH: "请补充更具体的业务场景，或联系管理员补充政策。",
+  KNOWLEDGE_DOCUMENT_INVALID: "请检查知识文档 Schema、索引数据和 RAG 服务版本。",
 };
 
 const categoryLabelMap: Record<AgentErrorInfo["category"], string> = {

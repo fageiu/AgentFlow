@@ -49,6 +49,22 @@ function hasApprovalStep(run: AgentRun | undefined) {
   return run?.steps.some((step) => step.approvalRequest || step.type === "approval") ?? false;
 }
 
+function hasPolicyCitation(run: AgentRun | undefined) {
+  return run?.steps.some((step) => {
+    if (step.toolName !== "searchPolicy" || step.status !== "completed") return false;
+    try {
+      const detail = JSON.parse(step.detail) as {
+        output?: { citation?: { documentId?: unknown; nodeId?: unknown; sourceName?: unknown; version?: unknown } };
+      };
+      const citation = detail.output?.citation;
+      return [citation?.documentId, citation?.nodeId, citation?.sourceName, citation?.version]
+        .every((value) => typeof value === "string" && value.length > 0);
+    } catch {
+      return false;
+    }
+  }) ?? false;
+}
+
 function createEmptyTokenUsage(): LlmTokenUsage {
   return {
     promptTokens: 0,
@@ -171,6 +187,22 @@ export function scoreEvaluationCase(input: {
         expectations.requiresApproval
           ? "该 case 应经过人工审批，以验证高风险工具的审批门禁。"
           : "该 case 不应出现人工审批，避免普通任务被误判为高风险。",
+      ),
+    );
+  }
+
+  if (expectations.requiresPolicyCitation != null) {
+    const actual = hasPolicyCitation(input.run);
+    assertions.push(
+      createAssertion(
+        "policy-citation",
+        "政策检索包含可追溯引用",
+        actual === expectations.requiresPolicyCitation,
+        expectations.requiresPolicyCitation ? "present" : "not-present",
+        actual ? "present" : "not-present",
+        expectations.requiresPolicyCitation
+          ? "searchPolicy 应返回 Document、Node、文件和版本引用，禁止仅凭模型常识下结论。"
+          : "该 case 不要求政策来源引用。",
       ),
     );
   }

@@ -54,13 +54,42 @@ function addOutputFacts(target: Map<string, EvidenceFact>, step: AgentStep, outp
     return;
   }
 
-  for (const [key, value] of Object.entries(output)) {
+  const outputRecord = output as Record<string, unknown>;
+
+  for (const [key, value] of Object.entries(outputRecord)) {
     if (["string", "number", "boolean"].includes(typeof value)) {
       target.set(`tool.${toolName}.${key}`, {
         id: `tool.${toolName}.${key}`,
         source: toolName,
         description: `${toolName} 输出字段 ${key}`,
         value,
+      });
+    }
+  }
+
+  // 检索引用和 Top-K 节点是服务端返回的可信事实，单独展开后模型才能精确引用。
+  if (toolName === "searchPolicy") {
+    const citation = outputRecord.citation;
+    if (citation && typeof citation === "object" && !Array.isArray(citation)) {
+      for (const [key, value] of Object.entries(citation)) {
+        if (["string", "number"].includes(typeof value)) {
+          target.set(`tool.searchPolicy.citation.${key}`, {
+            id: `tool.searchPolicy.citation.${key}`,
+            source: toolName,
+            description: `命中政策引用字段 ${key}`,
+            value,
+          });
+        }
+      }
+    }
+    if (Array.isArray(outputRecord.matches)) {
+      outputRecord.matches.slice(0, 5).forEach((match: unknown, index: number) => {
+        target.set(`tool.searchPolicy.matches.${index}`, {
+          id: `tool.searchPolicy.matches.${index}`,
+          source: toolName,
+          description: `政策检索 Top-${index + 1} 节点`,
+          value: match,
+        });
       });
     }
   }

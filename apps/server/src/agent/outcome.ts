@@ -86,6 +86,13 @@ function deriveConclusion(run: AgentRun, decision: AgentOutcome["decision"], per
   const policyTitle = textField(policy, "title");
   const policyContent = textField(policy, "content");
   const policyKeyword = textField(policy, "keyword");
+  const citation = asRecord(policy?.citation);
+  const citationParts = [
+    textField(citation, "sourceName"),
+    textField(citation, "version") ? `版本 ${textField(citation, "version")}` : undefined,
+    textField(citation, "section") ? `章节 ${textField(citation, "section")}` : undefined,
+    textField(citation, "page") ? `第 ${textField(citation, "page")} 页` : undefined,
+  ].filter((item): item is string => Boolean(item));
   const ticketId = textField(ticket, "id");
   const ticketStatus = textField(ticket, "status");
 
@@ -126,7 +133,7 @@ function deriveConclusion(run: AgentRun, decision: AgentOutcome["decision"], per
   const basisParts = [
     textField(customer, "id") ? `客户 ${textField(customer, "id")} 等级 ${textField(customer, "level") ?? "未知"}` : undefined,
     textField(order, "id") ? `订单 ${textField(order, "id")} 金额 ${textField(order, "amount") ?? "未知"} 元、状态 ${textField(order, "status") ?? "未知"}` : undefined,
-    policyId ? `业务规则 ${policyId}${policyTitle ? `（${policyTitle}）` : ""}` : undefined,
+    policyId ? `业务规则 ${policyId}${policyTitle ? `（${policyTitle}）` : ""}${citationParts.length ? `，来源 ${citationParts.join("、")}` : ""}` : undefined,
     performedActions.length > 0 ? `实际写入 ${performedActions.join("、")}` : "未发生业务写入",
   ].filter((item): item is string => Boolean(item));
 

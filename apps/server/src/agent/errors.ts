@@ -44,6 +44,56 @@ export class BusinessDataNotFoundError extends AgentTypedError {
   }
 }
 
+export type KnowledgeErrorCode =
+  | "KNOWLEDGE_SERVICE_UNAVAILABLE"
+  | "KNOWLEDGE_INDEX_NOT_READY"
+  | "KNOWLEDGE_NO_MATCH"
+  | "KNOWLEDGE_DOCUMENT_INVALID";
+
+const knowledgeErrorDefinitions: Record<KnowledgeErrorCode, Omit<AgentErrorInfo, "code" | "message" | "details">> = {
+  KNOWLEDGE_SERVICE_UNAVAILABLE: {
+    category: "system",
+    userMessage: "政策知识库服务暂时不可用，系统已停止后续业务操作。",
+    detailMessage: "无法连接政策知识库或服务返回临时故障。",
+    suggestion: "请检查 RAG 服务、网络和数据库状态，恢复后重试。",
+    retryable: true,
+  },
+  KNOWLEDGE_INDEX_NOT_READY: {
+    category: "system",
+    userMessage: "政策知识库索引尚未就绪，系统已停止后续业务操作。",
+    detailMessage: "知识库仍在加载模型、迁移数据库或构建索引。",
+    suggestion: "请等待 readiness 通过后重新发起任务。",
+    retryable: true,
+  },
+  KNOWLEDGE_NO_MATCH: {
+    category: "business",
+    userMessage: "政策知识库没有找到足够可靠的处理依据，未执行任何业务写入。",
+    detailMessage: "检索结果低于可信阈值，不能据此生成业务决策。",
+    suggestion: "请补充更具体的业务场景，或由知识库管理员补充相应政策。",
+    retryable: true,
+  },
+  KNOWLEDGE_DOCUMENT_INVALID: {
+    category: "tool",
+    userMessage: "政策知识库返回了不符合契约的文档数据，系统已安全停止。",
+    detailMessage: "检索响应缺少必要政策字段、得分或引用信息。",
+    suggestion: "请检查知识库文档 Schema、索引数据和服务版本。",
+    retryable: false,
+  },
+};
+
+/** 统一承载知识服务错误码，保留 RAG 服务返回的诊断信息。 */
+export class KnowledgeServiceError extends AgentTypedError {
+  constructor(code: KnowledgeErrorCode, message: string, details: Record<string, unknown> = {}, options?: { cause?: unknown }) {
+    super({
+      code,
+      message,
+      ...knowledgeErrorDefinitions[code],
+      details,
+    }, { cause: options?.cause });
+    this.name = "KnowledgeServiceError";
+  }
+}
+
 export class ToolNotAvailableError extends AgentTypedError {
   constructor(toolName: string) {
     super({
@@ -297,11 +347,14 @@ export function createAgentErrorEvent(run: AgentRun, error: AgentErrorInfo): Ext
 
 /** 将结构化 Agent 错误映射为稳定 HTTP 状态，非流式接口与全局兜底共用。 */
 export function getAgentErrorHttpStatus(error: AgentErrorInfo) {
-  if (error.code === "BUSINESS_DATA_NOT_FOUND") {
+  if (error.code === "BUSINESS_DATA_NOT_FOUND" || error.code === "KNOWLEDGE_NO_MATCH") {
     return 404;
   }
-  if (error.code === "TOOL_INPUT_VALIDATION_ERROR" || error.code === "TOOL_NOT_AVAILABLE") {
+  if (error.code === "TOOL_INPUT_VALIDATION_ERROR" || error.code === "TOOL_NOT_AVAILABLE" || error.code === "KNOWLEDGE_DOCUMENT_INVALID") {
     return 422;
+  }
+  if (error.code === "KNOWLEDGE_SERVICE_UNAVAILABLE" || error.code === "KNOWLEDGE_INDEX_NOT_READY") {
+    return 503;
   }
   if (error.code === "LLM_TIMEOUT") {
     return 504;

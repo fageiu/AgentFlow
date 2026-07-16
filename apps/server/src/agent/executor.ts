@@ -433,7 +433,10 @@ async function buildToolStep(run: AgentRun, index: number, toolCall: LlmToolCall
     throw new ToolNotAvailableError(toolName);
   }
 
-  const measured = await measureStep(() => runTool(toolName, toolCall.arguments));
+  const measured = await measureStep(() => runTool(toolName, toolCall.arguments, {
+    runId: run.id,
+    signal: getRunAbortSignal(run.id),
+  }));
   recordToolCall(run);
 
   return {
@@ -828,9 +831,18 @@ export function normalizeTaskAwareToolCall(
     keyword = "refund";
   }
 
-  return keyword
-    ? { ...toolCall, arguments: { ...toolCall.arguments, keyword } }
-    : toolCall;
+  const query = typeof toolCall.arguments.query === "string" && toolCall.arguments.query.trim().length >= 2
+    ? toolCall.arguments.query.trim()
+    : evidence;
+
+  return {
+    ...toolCall,
+    arguments: {
+      ...toolCall.arguments,
+      ...(keyword ? { keyword } : {}),
+      query,
+    },
+  };
 }
 
 /** 将当前计划位置写入模型上下文，同时让 trace 能据此审计每一步实际授权范围。 */

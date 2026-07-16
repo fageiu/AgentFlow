@@ -238,6 +238,38 @@ test("执行 T-1006 应命中高风险关闭规则且不触发退款写入", asy
   assert.ok(run.outcome?.conclusion?.nextStep.includes("人工审批"));
 });
 
+test("知识库无可靠结果时必须在任何退款和状态写入前失败", async () => {
+  const originalFetch = globalThis.fetch;
+  const previousMode = process.env.RAG_MODE;
+  process.env.RAG_MODE = "service";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    error: { code: "KNOWLEDGE_NO_MATCH", message: "no reliable policy" },
+  }), { status: 404 });
+
+  const { runAgentTask } = await import("./executor.js");
+  const { getSandboxState, resetSandboxState } = await import("../tools/sandboxTools.js");
+  resetSandboxState();
+  try {
+    let thrown: unknown;
+    try {
+      await runAgentTask("处理工单 T-1001：判断退款条件，必要时创建退款并更新工单状态。");
+    } catch (error) {
+      thrown = error;
+    }
+    const state = getSandboxState();
+    assert.ok(thrown && typeof thrown === "object" && "agentError" in thrown);
+    assert.equal((thrown as { agentError: { code: string } }).agentError.code, "KNOWLEDGE_NO_MATCH");
+    assert.equal(state.refunds.length, 0);
+    assert.equal(state.orders.find((order) => order.id === "O-7001")?.refundStatus, "none");
+    assert.equal(state.tickets.find((ticket) => ticket.id === "T-1001")?.status, "open");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousMode == null) delete process.env.RAG_MODE;
+    else process.env.RAG_MODE = previousMode;
+    resetSandboxState();
+  }
+});
+
 test("结构化业务决策必须引用可信事实并生成结果关联推荐", async () => {
   const { enrichOutcomeWithBusinessDecision } = await import("./businessDecision.js");
   const outcome = {
@@ -1026,7 +1058,7 @@ test("工具参数缺失时应返回可诊断的校验错误", async () => {
   let thrown: unknown;
 
   try {
-    runTool("createRefund", { orderId: "O-7001" });
+    await runTool("createRefund", { orderId: "O-7001" });
   } catch (error) {
     thrown = error;
   }

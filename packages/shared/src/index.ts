@@ -300,6 +300,48 @@ export interface Policy {
   content: string;
 }
 
+/** 检索节点的可追溯来源，旧 Run 可以不包含该字段。 */
+export interface PolicyCitation {
+  documentId: string;
+  nodeId: string;
+  sourceName: string;
+  version: string;
+  section?: string;
+  page?: number;
+}
+
+/** 企业政策知识库返回的单个检索节点及各阶段得分。 */
+export interface PolicyKnowledgeMatch {
+  policyId: string;
+  keyword: string;
+  title: string;
+  content: string;
+  score: number;
+  vectorScore?: number;
+  lexicalScore?: number;
+  fusionScore?: number;
+  rerankScore?: number;
+  citation: PolicyCitation;
+}
+
+/** 一次混合检索的候选规模和服务端耗时。 */
+export interface KnowledgeRetrievalMetrics {
+  vectorCandidates: number;
+  lexicalCandidates: number;
+  rerankedCandidates: number;
+  durationMs: number;
+}
+
+/** searchPolicy 的兼容输出：顶层保留旧 Policy 字段，同时暴露 Top-K 和引用。 */
+export interface PolicySearchResult extends Policy {
+  matchedKeyword: string;
+  requestedKeyword?: string;
+  score: number;
+  citation: PolicyCitation;
+  matches: PolicyKnowledgeMatch[];
+  retrieval: KnowledgeRetrievalMetrics;
+}
+
 /** 沙箱退款记录，代表 Agent 工具产生的业务状态变更。 */
 export interface Refund {
   id: string;
@@ -359,6 +401,8 @@ export interface EvaluationExpectations {
     count: number;
   };
   totalRefundCount?: number;
+  /** 要求已完成的 searchPolicy 输出携带可追溯文档与节点引用。 */
+  requiresPolicyCitation?: boolean;
 }
 
 /** 评测用例描述一次可重复执行的 Agent 任务和 deterministic judge 断言。 */
