@@ -1,0 +1,120 @@
+"""政策索引编排与幂等版本切换。"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Protocol
+
+from llama_index.core.schema import BaseNode
+
+from .documents import parse_policy_file
+from .nodes import build_document_ref_id, build_policy_nodes
+from .schemas import ParsedPolicyDocument, PolicyMetadata
+
+
+@dataclass(slots=True)
+class StoredDocument:
+    id: str
+    checksum: str
+    index_status: str
+    node_count: int = 0
+
+
+class DocumentRepository(Protocol):
+    async def find_by_policy_version(self, policy_id: str, version: str) -> StoredDocument | None: ...
+
+    async def begin_index(self, document: ParsedPolicyDocument, source_path: str) -> StoredDocument: ...
+
+    async def complete_index(self, document_id: str, node_count: int) -> None: ...
+
+    async def fail_index(self, document_id: str, message: str) -> None: ...
+
+
+class NodeStore(Protocol):
+    async def add(self, document_id: str, nodes: Sequence[BaseNode]) -> None: ...
+
+    async def delete_document(self, document_id: str) -> None: ...
+
+
+@dataclass(slots=True)
+class InMemoryDocumentRepository:
+    documents: dict[tuple[str, str], StoredDocument] = field(default_factory=dict)
+
+    async def find_by_policy_version(self, policy_id: str, version: str) -> StoredDocument | None:
+        return self.documents.get((policy_id, version))
+
+    async def begin_index(self, document: ParsedPolicyDocument, source_path: str) -> StoredDocument:
+        del source_path
+        stored = StoredDocument(build_document_ref_id(document), document.checksum, "indexing")
+        self.documents[(document.metadata.policy_id, document.metadata.version)] = stored
+        return stored
+
+    async def complete_index(self, document_id: str, node_count: int) -> None:
+        stored = next(item for item in self.documents.values() if item.id == document_id)
+        stored.index_status = "indexed"
+        stored.node_count = node_count
+
+    async def fail_index(self, document_id: str, message: str) -> None:
+        del message
+        stored = next(item for item in self.documents.values() if item.id == document_id)
+        stored.index_status = "failed"
+
+
+@dataclass(slots=True)
+class InMemoryNodeStore:
+    nodes: dict[str, list[BaseNode]] = field(default_factory=dict)
+
+    async def add(self, document_id: str, nodes: Sequence[BaseNode]) -> None:
+        self.nodes[document_id] = list(nodes)
+
+    async def delete_document(self, document_id: str) -> None:
+        self.nodes.pop(document_id, None)
+
+
+@dataclass(slots=True)
+class IngestionResult:
+    document_id: str
+    status: str
+    node_count: int
+
+
+class IngestionService:
+    def __init__(
+        self,
+        repository: DocumentRepository,
+        node_store: NodeStore,
+        *,
+        chunk_size: int = 512,
+        chunk_overlap: int = 80,
+    ) -> None:
+        self.repository = repository
+        self.node_store = node_store
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+
+    async def ingest_file(self, path: Path, metadata: PolicyMetadata | None = None) -> IngestionResult:
+        document = parse_policy_file(path, metadata)
+        existing = await self.repository.find_by_policy_version(
+            document.metadata.policy_id, document.metadata.version
+        )
+        if existing and existing.checksum == document.checksum and existing.index_status == "indexed":
+            return IngestionResult(existing.id, "unchanged", existing.node_count)
+
+        stored = await self.repository.begin_index(document, str(path))
+        try:
+            nodes = build_policy_nodes(
+                document,
+                chunk_size=self.chunk_size,
+                chunk_overlap=self.chunk_overlap,
+            )
+            await self.node_store.add(stored.id, nodes)
+            await self.repository.complete_index(stored.id, len(nodes))
+            if existing and existing.id != stored.id:
+                await self.node_store.delete_document(existing.id)
+        except Exception as error:
+            await self.node_store.delete_document(stored.id)
+            await self.repository.fail_index(stored.id, str(error))
+            raise
+        return IngestionResult(stored.id, "indexed", len(nodes))
