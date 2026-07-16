@@ -4,6 +4,11 @@ dist/
 .env.local
 .DS_Store
 coverage/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
 .vscode/
 .pnpm-store/
 .logs/

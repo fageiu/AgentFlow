@@ -9,7 +9,6 @@ from collections import Counter
 from datetime import date
 from pathlib import Path
 
-
 RAG_ROOT = Path(__file__).resolve().parents[1]
 POLICY_ROOT = RAG_ROOT / "knowledge" / "policies"
 QUERY_PATH = RAG_ROOT / "knowledge" / "evaluation" / "golden_queries.json"
