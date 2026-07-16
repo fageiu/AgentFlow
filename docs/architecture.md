@@ -15,6 +15,10 @@ flowchart LR
     Executor --> Registry["Tool Registry"]
     Registry --> Schema["Zod + JSON Schema"]
     Registry --> Sandbox["工单 / 客户 / 订单 / 规则"]
+    Registry -->|"searchPolicy async"| RagApi["FastAPI RAG API"]
+    RagApi --> Llama["LlamaIndex Hybrid Retriever"]
+    Llama --> Pg["PostgreSQL / pgvector / FTS"]
+    RagApi --> Bge["BGE-M3 + BGE Reranker"]
 
     Registry -->|"high risk"| Approval["Human Approval"]
     Approval -->|"批准 / 拒绝"| Executor
@@ -36,6 +40,7 @@ sequenceDiagram
     participant E as Executor
     participant L as LLM Provider
     participant T as Tool Registry
+    participant R as Policy RAG
     participant A as Approval Store
 
     U->>W: 提交业务任务
@@ -48,7 +53,13 @@ sequenceDiagram
         L-->>E: 单个工具及参数
         E->>T: 校验工具授权、风险和参数
         alt 普通工具
-            T-->>E: 执行结果
+            alt searchPolicy
+                T->>R: query + keyword_hint + Run ID
+                R-->>T: Top-K + scores + Citation
+                T-->>E: 兼容 PolicySearchResult
+            else 其他普通工具
+                T-->>E: 执行结果
+            end
         else 高风险工具
             E->>A: 创建审批请求并暂停
             E-->>W: approval_required
@@ -83,5 +94,7 @@ sequenceDiagram
 3. 所有工具参数必须通过服务端 Zod 校验，Prompt 不是安全边界。
 4. 高风险工具批准前不产生业务写入，拒绝后不推进后续状态更新。
 5. 模型自报动作不作为事实，业务结论必须由服务端 Trace 与状态派生。
-5. 工具成功后才推进计划游标，失败时只重规划尚未完成的步骤。
-6. 评测复用真实 Executor 和 Tool Registry，同时检查回答、Trace 和最终业务状态。
+6. 工具成功后才推进计划游标，失败时只重规划尚未完成的步骤。
+7. 评测复用真实 Executor 和 Tool Registry，同时检查回答、Trace 和最终业务状态。
+8. 真实模式的政策检索失败必须在所有写工具之前终止，禁止静默回退 Seed Policy。
+9. 模型只能引用 RAG 返回的 Document/Node Citation；失效和非当前版本不得进入默认召回。

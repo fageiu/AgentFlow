@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { AgentStep } from "@agentflow/shared";
+import PolicyRetrievalDetail from "./PolicyRetrievalDetail.vue";
 import { buildStepErrorSummary } from "../utils/errors";
 import {
   getStepStatusLabel,
@@ -117,8 +118,12 @@ const approvalPreview = computed(() => {
           <strong>输入</strong>
           <pre>{{ formatToolPayload(toolDetail.input) }}</pre>
         </div>
+        <PolicyRetrievalDetail
+          v-if="step.toolName === 'searchPolicy'"
+          :output="toolDetail.output"
+        />
         <div class="plan-tool-payload">
-          <strong>输出</strong>
+          <strong>{{ step.toolName === 'searchPolicy' ? '原始输出' : '输出' }}</strong>
           <pre>{{ formatToolPayload(toolDetail.output) }}</pre>
         </div>
       </details>

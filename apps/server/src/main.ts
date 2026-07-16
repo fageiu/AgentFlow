@@ -517,4 +517,8 @@ app.post<{ Body: ResolveApprovalBody; Params: RunHistoryParams }>("/agent/runs/:
 app.post<{ Body: CancelRunBody; Params: RunHistoryParams }>("/agent/runs/:runId/cancel", handleCancelRun);
 app.delete("/agent/runs", handleClearAgentRuns);
 
-await app.listen({ host: "127.0.0.1", port: 3001 });
+const port = Number(process.env.PORT ?? 3001);
+await app.listen({
+  host: process.env.HOST ?? "127.0.0.1",
+  port: Number.isFinite(port) ? port : 3001,
+});

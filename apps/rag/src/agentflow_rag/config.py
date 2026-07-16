@@ -21,7 +21,7 @@ class RagSettings(BaseSettings):
     admin_token: SecretStr = Field(default=SecretStr("agentflow-local-admin"))
     model_cache_dir: Path = Path(".rag-models")
     upload_dir: Path = Path(".rag-data/uploads")
-    bundled_policy_dir: Path = Path(__file__).resolve().parents[3] / "knowledge" / "policies"
+    bundled_policy_dir: Path = Path(__file__).resolve().parents[2] / "knowledge" / "policies"
     embedding_model: str = "BAAI/bge-m3"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     embedding_dimension: int = 1024

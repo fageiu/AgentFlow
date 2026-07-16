@@ -41,19 +41,37 @@ class CandidateReranker(Protocol):
 
 
 class LlamaIndexVectorSource:
-    def __init__(self, vector_store: PGVectorStore, embed_model: BaseEmbedding) -> None:
+    def __init__(
+        self,
+        vector_store: PGVectorStore,
+        embed_model: BaseEmbedding,
+        sessions: async_sessionmaker | None = None,
+    ) -> None:
         self.index = VectorStoreIndex.from_vector_store(vector_store, embed_model=embed_model)
+        self.sessions = sessions
 
     async def retrieve(
         self, query: str, top_k: int, *, include_archived: bool = False
     ) -> list[NodeWithScore]:
         retriever = self.index.as_retriever(similarity_top_k=top_k)
         candidates = await retriever.aretrieve(query)
-        return [
-            item
-            for item in candidates
-            if include_archived or item.node.metadata.get("status") == "active"
-        ]
+        if include_archived:
+            return candidates
+        if self.sessions is None:
+            return [item for item in candidates if item.node.metadata.get("status") == "active"]
+        async with self.sessions() as session:
+            current_ids = set(
+                (
+                    await session.scalars(
+                        select(KnowledgeDocumentModel.id).where(
+                            KnowledgeDocumentModel.status == "active",
+                            KnowledgeDocumentModel.index_status == "indexed",
+                            KnowledgeDocumentModel.is_current.is_(True),
+                        )
+                    )
+                ).all()
+            )
+        return [item for item in candidates if item.node.metadata.get("document_id") in current_ids]
 
 
 class PostgresLexicalSource:
@@ -105,11 +123,15 @@ class LlamaIndexSentenceReranker:
         self._postprocessor_type = SentenceTransformerRerank
         self._postprocessor = None
 
+    def load(self, top_n: int = 10) -> None:
+        """在 readiness 前显式加载模型，避免首次真实查询承担冷启动。"""
+        if self._postprocessor is None:
+            self._postprocessor = self._postprocessor_type(model=self.model_name, top_n=top_n)
+
     async def rerank(
         self, query: str, candidates: Sequence[NodeWithScore], top_n: int
     ) -> list[NodeWithScore]:
-        if self._postprocessor is None:
-            self._postprocessor = self._postprocessor_type(model=self.model_name, top_n=top_n)
+        self.load(top_n)
         return await self._postprocessor.apostprocess_nodes(list(candidates), query_str=query)
 
 
@@ -183,6 +205,8 @@ def reciprocal_rank_fusion(
             node_id = candidate.node.node_id
             by_id.setdefault(node_id, candidate)
             scores[node_id] = scores.get(node_id, 0) + 1 / (rrf_k + rank)
+            score_key = "vector_score" if candidates is vector else "lexical_score"
+            by_id[node_id].node.metadata[score_key] = candidate.score
 
     result: list[NodeWithScore] = []
     for node_id, raw_score in scores.items():
@@ -248,6 +272,8 @@ class RetrievalService:
             title=str(metadata["title"]),
             content=candidate.node.text,
             score=score,
+            vector_score=_optional_score(metadata.get("vector_score")),
+            lexical_score=_optional_score(metadata.get("lexical_score")),
             fusion_score=float(metadata.get("fusion_score", 0)),
             rerank_score=score,
             citation=PolicyCitation(
@@ -260,3 +286,6 @@ class RetrievalService:
             ),
         )
 
+
+def _optional_score(value: object) -> float | None:
+    return float(value) if isinstance(value, int | float) else None

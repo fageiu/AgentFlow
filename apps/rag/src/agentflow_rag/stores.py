@@ -75,7 +75,29 @@ class SqlDocumentRepository:
             current.index_status = "indexed"
             current.node_count = node_count
             current.error_message = None
-            current.is_current = current.status == "active"
+            current.is_current = False
+            await session.flush()
+            # 当前版本由有效且已成功索引的最新生效日期决定，不能依赖文件导入顺序。
+            latest_active_id = await session.scalar(
+                select(KnowledgeDocumentModel.id)
+                .where(
+                    KnowledgeDocumentModel.policy_id == current.policy_id,
+                    KnowledgeDocumentModel.status == "active",
+                    KnowledgeDocumentModel.index_status == "indexed",
+                )
+                .order_by(
+                    KnowledgeDocumentModel.effective_date.desc(),
+                    KnowledgeDocumentModel.version.desc(),
+                    KnowledgeDocumentModel.updated_at.desc(),
+                )
+                .limit(1)
+            )
+            if latest_active_id:
+                await session.execute(
+                    update(KnowledgeDocumentModel)
+                    .where(KnowledgeDocumentModel.id == latest_active_id)
+                    .values(is_current=True)
+                )
 
     async def fail_index(self, document_id: str, message: str) -> None:
         async with self.sessions.begin() as session:
@@ -135,4 +157,3 @@ class PostgresNodeStore:
                     KnowledgeLexicalNodeModel.document_id == document_id
                 )
             )
-

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from typing import Annotated
 
@@ -13,6 +14,7 @@ from .retrieval import RetrievalService
 from .schemas import PolicyMetadata, SearchRequest, SearchResponse
 
 router = APIRouter(prefix="/v1")
+logger = logging.getLogger(__name__)
 
 
 def _retrieval(request: Request) -> RetrievalService:
@@ -37,7 +39,18 @@ def _require_admin(request: Request, token: str | None) -> None:
 
 @router.post("/search", response_model=SearchResponse, tags=["search"])
 async def search_policy(payload: SearchRequest, request: Request) -> SearchResponse:
-    return await _retrieval(request).search(payload)
+    result = await _retrieval(request).search(payload)
+    logger.info(
+        "policy_search_completed",
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "run_id": request.headers.get("X-Agent-Run-Id"),
+            "document_ids": list(dict.fromkeys(item.citation.document_id for item in result.matches)),
+            "node_ids": [item.citation.node_id for item in result.matches],
+            "duration_ms": result.retrieval.duration_ms,
+        },
+    )
+    return result
 
 
 @router.get("/admin/documents", tags=["admin"])
@@ -74,7 +87,16 @@ async def upload_document(
             department=department,
         )
     content = await file.read()
-    return await _admin(request).upload(file.filename or "upload", content, metadata)
+    result = await _admin(request).upload(file.filename or "upload", content, metadata)
+    logger.info(
+        "policy_document_uploaded",
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "document_id": result.document_id,
+            "node_count": result.node_count,
+        },
+    )
+    return result
 
 
 @router.post("/admin/documents/{document_id}/reindex", tags=["admin"])
@@ -82,7 +104,16 @@ async def reindex_document(
     document_id: str, request: Request, x_admin_token: str | None = Header(default=None)
 ):
     _require_admin(request, x_admin_token)
-    return await _admin(request).reindex(document_id)
+    result = await _admin(request).reindex(document_id)
+    logger.info(
+        "policy_document_reindexed",
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "document_id": result.document_id,
+            "node_count": result.node_count,
+        },
+    )
+    return result
 
 
 @router.delete("/admin/documents/{document_id}", tags=["admin"])
@@ -90,7 +121,16 @@ async def delete_document(
     document_id: str, request: Request, x_admin_token: str | None = Header(default=None)
 ):
     _require_admin(request, x_admin_token)
-    return {"deleted": await _admin(request).delete(document_id)}
+    deleted = await _admin(request).delete(document_id)
+    logger.info(
+        "policy_document_deleted",
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "document_id": document_id,
+            "status": "deleted" if deleted else "not_found",
+        },
+    )
+    return {"deleted": deleted}
 
 
 @router.post("/admin/reindex-bundled", tags=["admin"])
@@ -98,4 +138,13 @@ async def reindex_bundled(
     request: Request, x_admin_token: str | None = Header(default=None)
 ):
     _require_admin(request, x_admin_token)
-    return {"results": await _admin(request).reindex_bundled()}
+    results = await _admin(request).reindex_bundled()
+    logger.info(
+        "bundled_policy_reindex_requested",
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "document_count": len(results),
+            "node_count": sum(item.node_count for item in results),
+        },
+    )
+    return {"results": results}

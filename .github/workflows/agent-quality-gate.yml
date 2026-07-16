@@ -15,6 +15,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  rag-quality:
+    name: Python RAG and pgvector integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: agentflow_rag
+          POSTGRES_USER: agentflow
+          POSTGRES_PASSWORD: agentflow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentflow -d agentflow_rag"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      RAG_DATABASE_URL: postgresql+asyncpg://agentflow:agentflow@127.0.0.1:5432/agentflow_rag
+      RAG_TEST_DATABASE_URL: postgresql+asyncpg://agentflow:agentflow@127.0.0.1:5432/agentflow_rag
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.2"
+          enable-cache: true
+          cache-dependency-glob: apps/rag/uv.lock
+
+      - name: Install locked RAG dependencies
+        working-directory: apps/rag
+        run: uv sync --frozen --extra dev
+
+      - name: Apply Alembic migrations
+        working-directory: apps/rag
+        run: uv run alembic upgrade head
+
+      - name: Run Python static checks
+        working-directory: apps/rag
+        run: uv run ruff check src tests
+
+      # Fake/预置向量保证 CI 不下载 BGE 模型；PostgreSQL 路径仍使用真实 pgvector。
+      - name: Run RAG unit and integration tests
+        working-directory: apps/rag
+        run: uv run pytest -q
+
   quality-gate:
     name: Test, build and evaluate
     runs-on: ubuntu-latest

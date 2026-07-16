@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import type { AgentPlanStep, AgentRun, AgentStep } from "@agentflow/shared";
 import AgentStepDetail from "./AgentStepDetail.vue";
+import PolicyRetrievalDetail from "./PolicyRetrievalDetail.vue";
 import { buildStepErrorSummary } from "../utils/errors";
 import { buildCompactTraceItems, getStepPlan, parseStepDetail } from "../utils/trace";
 
@@ -368,8 +369,12 @@ const streamingActivity = computed(() => {
                 <strong>输入</strong>
                 <pre>{{ formatToolPayload(getToolCallDetail(item).input) }}</pre>
               </div>
+              <PolicyRetrievalDetail
+                v-if="getToolCallDetail(item).toolName === 'searchPolicy'"
+                :output="getToolCallDetail(item).output"
+              />
               <div class="plan-tool-payload">
-                <strong>输出</strong>
+                <strong>{{ getToolCallDetail(item).toolName === 'searchPolicy' ? '原始输出' : '输出' }}</strong>
                 <pre>{{ formatToolPayload(getToolCallDetail(item).output) }}</pre>
               </div>
             </details>

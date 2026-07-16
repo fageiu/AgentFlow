@@ -51,6 +51,9 @@ def test_search_returns_policy_citation(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.json()["matches"][0]["policy_id"] == "P-refund-001"
     assert response.json()["matches"][0]["citation"]["section"] == "受理条件"
+    assert response.json()["matches"][0]["vector_score"] == 0.9
+    assert response.json()["matches"][0]["lexical_score"] == 0.9
+    assert response.headers["X-Request-Id"]
 
 
 def test_admin_requires_token(tmp_path: Path) -> None:
@@ -84,4 +87,3 @@ def test_search_returns_not_ready_without_service(tmp_path: Path) -> None:
     )
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "KNOWLEDGE_INDEX_NOT_READY"
-

@@ -27,6 +27,9 @@ class ReadinessService:
         self._database_probe = database_probe
         self.state = ReadinessState()
 
+    def set_database_probe(self, database_probe: Probe) -> None:
+        self._database_probe = database_probe
+
     async def refresh_database(self) -> bool:
         if self._database_probe is None:
             return self.state.database_ready

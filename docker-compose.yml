@@ -1,0 +1,99 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: agentflow_rag
+      POSTGRES_USER: agentflow
+      POSTGRES_PASSWORD: agentflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentflow -d agentflow_rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  rag:
+    build:
+      context: .
+      dockerfile: apps/rag/Dockerfile
+    environment:
+      RAG_DATABASE_URL: postgresql+asyncpg://agentflow:agentflow@postgres:5432/agentflow_rag
+      RAG_ADMIN_TOKEN: ${RAG_ADMIN_TOKEN:-agentflow-local-admin}
+      RAG_MODEL_CACHE_DIR: /models
+      RAG_UPLOAD_DIR: /data/uploads
+      RAG_LOAD_MODELS: "true"
+      RAG_AUTO_INGEST_BUNDLED: "true"
+      HF_HOME: /models
+      SENTENCE_TRANSFORMERS_HOME: /models
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - model_cache:/models
+      - rag_uploads:/data/uploads
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=5)"]
+      interval: 10s
+      timeout: 8s
+      retries: 60
+      start_period: 30s
+    restart: unless-stopped
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      RAG_MODE: service
+      RAG_BASE_URL: http://rag:8000
+      RAG_REQUEST_TIMEOUT_MS: 3000
+      RAG_MAX_RETRIES: 1
+      LLM_MOCK: ${LLM_MOCK:-true}
+      LLM_FALLBACK_ON_ERROR: ${LLM_FALLBACK_ON_ERROR:-true}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      AGENTFLOW_DATA_DIR: /data
+    depends_on:
+      rag:
+        condition: service_healthy
+    volumes:
+      - server_state:/data
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  model_cache:
+  rag_uploads:
+  server_state:

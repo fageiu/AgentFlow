@@ -29,6 +29,8 @@
 - `apps/server/src/approval/approvalStore.ts`：高风险工具调用的内存审批状态。
 - `apps/server/src/llm/*`：LLM 配置、Prompt 和 Provider 封装。
 - `apps/server/src/knowledge/ragClient.ts`：企业政策 RAG 服务客户端，负责 Fixture/Service 模式隔离、超时重试、错误映射和 Citation 契约转换；真实模式禁止回退 Seed Policy。
+- `apps/rag/src/agentflow_rag/runtime.py`：生产 RAG 依赖装配，按数据库、BGE 模型、bundled 索引顺序更新 readiness。
+- `apps/web/src/components/PolicyRetrievalDetail.vue`：Trace 中的政策证据账本，展示 Top-K、检索得分和文件/版本/章节/页码引用。
 - `apps/server/src/trace/runStore.ts`：AgentRun trace 历史的内存存储与摘要查询。
 - `apps/server/src/conversation/conversationStore.ts`：可恢复会话的内存存储，负责会话摘要、消息快照和消息内嵌 trace。
 - `apps/server/src/eval/*`：评测用例、批量运行器、规则评分器和评测结果存储。

@@ -5,6 +5,12 @@ from agentflow_rag.config import RagSettings
 from agentflow_rag.health import ReadinessService
 
 
+def test_default_bundled_policy_path_exists() -> None:
+    settings = RagSettings(load_models=False)
+    assert settings.bundled_policy_dir.is_dir()
+    assert len(list(settings.bundled_policy_dir.rglob("*.md"))) >= 20
+
+
 def test_health_is_independent_from_readiness(tmp_path) -> None:
     settings = RagSettings(load_models=False, upload_dir=tmp_path / "uploads")
     client = TestClient(create_app(settings=settings, readiness=ReadinessService()))
@@ -42,4 +48,3 @@ def test_readiness_contains_safe_dependency_diagnostic(tmp_path) -> None:
     assert response.status_code == 503
     assert response.json()["details"] == {"database": "RuntimeError"}
     assert "password" not in response.text
-

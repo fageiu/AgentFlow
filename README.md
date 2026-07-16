@@ -10,10 +10,11 @@ AgentFlow 是一个面向企业流程自动化的 AI Agent Runtime 与 Evaluatio
 - **统一 Tool Registry**：集中维护工具描述、风险等级、Zod 入参校验、JSON Schema 与执行入口，让模型工具定义和服务端校验保持一致。
 - **Human-in-the-loop**：`riskLevel: "high"` 的退款工具必须等待人工批准；拒绝后不创建退款，也不继续更新工单状态。
 - **可观测与可恢复**：通过 SSE 展示执行时间线，持久化 AgentRun、会话和审批快照，并将服务重启时无法继续的任务降级为可重试中断状态。
-- **确定性 Agent 评测**：内置 18 条 golden task，覆盖查询、知识检索、退款、审批边界、异常安全和幂等性；同时断言最终回答、工具轨迹与业务副作用。
+- **确定性 Agent 评测**：内置 28 条 golden task（含 10 条 RAG 专项），同时断言最终回答、Citation、工具轨迹与业务副作用。
 - **结构化业务 Outcome**：服务端根据真实工具轨迹和审批决议派生 `decision`、实际写入动作与证据引用，自然语言措辞变化不再影响核心业务判定。
 - **业务语义约束**：单工单任务会预读取真实上下文，规则检索依据工单标题和描述归一到退款、审批、发票、SLA、升级、取消、重复退款或安全规则，降低模型误选工具和关键词的概率。
 - **模型层解耦**：统一封装 OpenAI-compatible Provider，支持兼容模型切换和 Mock fallback，便于本地演示与稳定回归。
+- **企业政策 RAG**：独立 FastAPI + LlamaIndex 服务使用 BGE-M3、BGE Reranker、pgvector 与中文全文索引，`searchPolicy` 返回 Top-K、分阶段得分和可验证 Citation。
 
 完整设计见 [Agent 执行架构](docs/architecture.md)。
 
@@ -33,7 +34,7 @@ AgentFlow 是一个面向企业流程自动化的 AI Agent Runtime 与 Evaluatio
 - Business Context：右侧面板可跟随当前任务中的工单号，也可手动切换工单；未指定工单时展示沙箱业务概览。
 - Recoverable Conversations：后端维护会话摘要和完整消息快照，前端可以创建、切换和恢复多轮会话。
 - Run Control：支持取消当前执行、重试上一条任务，并在刷新恢复时提示可重试的中断消息。
-- Evaluation Workbench：内置 18 条评测用例，支持按能力分组运行、断言诊断、工具轨迹、token/工具调用指标和模型/Prompt A/B 对比。
+- Evaluation Workbench：内置 28 条评测用例，支持按能力分组运行、Citation 断言、工具轨迹、token/工具调用指标和模型/Prompt A/B 对比。
 
 ## 项目结构
 
@@ -41,6 +42,7 @@ AgentFlow 是一个面向企业流程自动化的 AI Agent Runtime 与 Evaluatio
 apps/
   web/                 Vue 3 + Vite 前端工作台、会话、Trace 与评测界面
   server/              Fastify API、Agent 执行器、LLM、工具、审批、Trace 与评测
+  rag/                 FastAPI + LlamaIndex 摄取、混合检索、管理 API 与 50 条检索评测集
 packages/
   shared/              前后端共享类型和 SSE 事件契约
 docs/
@@ -58,7 +60,7 @@ docs/
   -> 后端创建 AgentRun
   -> Planner 生成并校验结构化执行计划（步骤、工具授权、审批要求）
   -> Executor 只接受当前计划步骤授权的一项 tool_call
-  -> 后端通过 Tool Registry 校验并执行工具，成功后才推进下一步骤
+  -> 后端通过 Tool Registry 校验并执行工具；searchPolicy 异步调用 RAG 并返回 Citation
   -> 工具失败时将观察结果交给 Replanner，只重规划尚未完成的步骤
   -> 高风险工具进入 approval_required，前端展示批准/拒绝按钮
   -> 审批结果通过 approval_resolved 回到同一条执行流
@@ -91,6 +93,45 @@ docs/
 - `GET /eval/runs`：读取评测运行历史，包含分组汇总、模型配置、token/工具调用指标和相对上一轮的回归对比。
 - `DELETE /eval/runs`：清空评测运行历史，不影响会话、Agent run trace 或沙箱数据。
 - `GET /eval/runs/:evaluationRunId`：读取单次评测完整断言、诊断、工具轨迹和失败原因。
+- `POST http://127.0.0.1:8000/v1/search`：混合检索企业政策，返回 Top-K、各阶段得分和引用。
+- `GET http://127.0.0.1:8000/v1/admin/documents`：列出知识文档，需要 `X-Admin-Token`。
+- `POST http://127.0.0.1:8000/v1/admin/documents`：上传 Markdown/PDF 并幂等索引，需要 `X-Admin-Token`。
+- `POST http://127.0.0.1:8000/v1/admin/reindex-bundled`：重建 bundled 政策索引。
+
+## 企业政策知识库
+
+`apps/rag/knowledge/policies` 是真实检索数据源，共包含 27 篇正式政策、FAQ/指引与历史版本；原 TypeScript Seed Policy 只保留给旧 Trace 与显式 Mock 评测。默认检索排除 `archived`，同一政策只召回最新的有效版本。
+
+检索链路如下：
+
+```txt
+Markdown / PDF
+  -> SentenceSplitter(512 / overlap 80)
+  -> BGE-M3 1024 维向量 + pgvector
+  -> jieba 中文分词 + PostgreSQL FTS
+  -> 向量 Top20 + 关键词 Top20
+  -> RRF(k=60) 融合前 10
+  -> BGE Reranker
+  -> 阈值 0.35 拒答或返回 Top5 Citation
+```
+
+搜索示例：
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"核心接口中断两小时如何处理","keyword_hint":"sla","top_k":5}'
+```
+
+上传 Markdown：
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/admin/documents \
+  -H "X-Admin-Token: agentflow-local-admin" \
+  -F "file=@./policy.md"
+```
+
+PDF 首期要求文本型文件，并通过表单同时提供 `policy_id`、`keyword`、`title`、`version`、`effective_date`、`status` 和 `department`；扫描件暂不做 OCR。
 
 ## LLM 配置
 
@@ -144,7 +185,7 @@ pnpm --filter @agentflow/server eval -- \
   --output docs/evaluation-results/deepseek-smoke.md
 ```
 
-确认配置、费用和工具调用符合预期后，再运行完整 18 条用例：
+确认配置、费用和工具调用符合预期后，再运行完整 28 条用例：
 
 ```bash
 pnpm --filter @agentflow/server eval -- \
@@ -183,19 +224,54 @@ CI 不读取真实模型密钥，也不会产生模型 API 费用。真实模型
 
 | 报告 | 模式 | 结果 | 说明 |
 |---|---|---:|---|
-| [Mock 全量基线](docs/evaluation-results/mock-full.md) | Mock | 18/18 | 用于本地确定性回归和 CI 门禁 |
+| [Mock 全量基线](docs/evaluation-results/mock-full.md) | Mock | 18/18 | 历史 18 条基线；当前 CI 已扩展为 28 条 |
 | [DeepSeek Outcome 全量评测](docs/evaluation-results/deepseek-post-outcome-full.md) | 真实模型 | 17/18 | 17 条通过、1 条因 Planner step 校验失败而异常 |
 | [Planner 稳健性定向复测](docs/evaluation-results/deepseek-planner-robustness-targeted.md) | 真实模型 | 1/1 | 上述幂等性失败路径定向复测通过 |
 
 真实模型全量报告的通过率为 94.4%，共消耗 185,322 Token；随后通过的单 Case 定向复测只证明对应失败路径已恢复，不等同于重新完成全量 18/18 回归。报告记录的是特定模型、Prompt 和代码版本下的实验结果，不能视为对后续版本的永久保证。
 
-## 本地运行
+## Docker Compose 一键运行
 
-前置环境：Node.js 20 或更高版本、pnpm 9（仓库声明版本为 `9.15.0`）。
+前置环境：Docker Desktop / Docker Engine。首次启动需要下载 BGE-M3 与 BGE Reranker，耗时取决于网络和 CPU；模型缓存会保存在命名 Volume，后续启动复用。
+
+```bash
+docker compose up --build
+```
+
+启动顺序由健康检查约束：PostgreSQL/pgvector → Alembic → 模型加载 → bundled 索引 → RAG readiness → Fastify Server → Vue Web。
+
+```txt
+Web：http://127.0.0.1:5173
+Server：http://127.0.0.1:3001/health
+RAG Swagger：http://127.0.0.1:8000/docs
+RAG readiness：http://127.0.0.1:8000/readyz
+```
+
+`docker compose down` 会保留索引、模型和上传文档。若要完全删除 PostgreSQL、模型缓存、上传文档和 Agent 状态，执行 `docker compose down -v`。
+
+## 本地开发运行
+
+前置环境：Node.js 20+、pnpm 9、Python 3.12、uv 和 PostgreSQL 16 + pgvector。
 
 ```bash
 pnpm install
 pnpm dev
+```
+
+RAG 服务单独运行：
+
+```bash
+cd apps/rag
+uv sync --frozen --extra dev
+uv run alembic upgrade head
+uv run agentflow-rag
+```
+
+RAG 服务 ready 后，可执行真实 BGE 检索门禁：
+
+```bash
+cd apps/rag
+uv run agentflow-rag-eval --enforce-targets --output ../../.agentflow-artifacts/rag-evaluation.json
 ```
 
 也可以只启动一侧：
@@ -219,6 +295,15 @@ pnpm --filter @agentflow/server test
 SSE 执行接口：http://127.0.0.1:3001/agent/run/stream?task=处理工单%20T-1001
 Trace 历史接口：http://127.0.0.1:3001/agent/runs
 ```
+
+### RAG 故障排查
+
+- `/healthz` 为 200、`/readyz` 为 503：查看 `checks`，分别定位数据库、模型或索引未就绪。
+- `KNOWLEDGE_SERVICE_UNAVAILABLE`：确认 8000 端口、`RAG_BASE_URL` 与容器网络；真实模式不会回退 Seed Policy。
+- `KNOWLEDGE_INDEX_NOT_READY`：等待模型加载/自动索引完成，或调用 `POST /v1/admin/reindex-bundled`。
+- `KNOWLEDGE_NO_MATCH`：问题低于 0.35 阈值；补充具体业务场景或新增政策，不应降低阈值掩盖语料缺口。
+- PDF 导入失败：确认是文本型 PDF且页码可提取；扫描 PDF 需要后续 OCR 扩展。
+- 首次启动慢：BGE 模型只在首次下载；检查 `model_cache` Volume 是否被保留。
 
 ## 本地持久化
 
