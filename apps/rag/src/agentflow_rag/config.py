@@ -33,6 +33,7 @@ class RagSettings(BaseSettings):
     result_top_k: int = 5
     minimum_score: float = 0.35
     rrf_k: int = 60
+    max_upload_bytes: int = 10 * 1024 * 1024
     load_models: bool = True
     auto_ingest_bundled: bool = True
 
@@ -55,4 +56,3 @@ class RagSettings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> RagSettings:
     return RagSettings()
-
