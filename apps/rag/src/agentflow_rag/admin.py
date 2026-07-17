@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from collections.abc import Sequence
 from pathlib import Path
@@ -97,7 +98,8 @@ class KnowledgeAdminService:
             )
         source_path = Path(model.source_path)
         if self._is_inside(source_path, self.upload_dir):
-            source_path.unlink(missing_ok=True)
+            # 文件系统删除可能阻塞事件循环，交给工作线程执行。
+            await asyncio.to_thread(source_path.unlink, missing_ok=True)
         return True
 
     async def reindex_bundled(self) -> list[IngestionResult]:

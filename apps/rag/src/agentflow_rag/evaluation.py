@@ -59,7 +59,9 @@ def percentile_95(values: list[int]) -> float:
 
 
 async def evaluate_queries(service: SearchService, query_path: Path) -> RetrievalEvaluationSummary:
-    cases = json.loads(query_path.read_text(encoding="utf-8"))
+    # Golden Query 文件读取属于阻塞 I/O，避免占用检索服务事件循环。
+    query_text = await asyncio.to_thread(query_path.read_text, encoding="utf-8")
+    cases = json.loads(query_text)
     recalls: list[float] = []
     reciprocal_ranks: list[float] = []
     no_answer_results: list[bool] = []
