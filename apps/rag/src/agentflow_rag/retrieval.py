@@ -41,6 +41,7 @@ class CandidateReranker(Protocol):
 
 
 class LlamaIndexVectorSource:
+    """向量检索"""
     def __init__(
         self,
         vector_store: PGVectorStore,
@@ -75,6 +76,7 @@ class LlamaIndexVectorSource:
 
 
 class PostgresLexicalSource:
+    """中文词法检索"""
     def __init__(self, sessions: async_sessionmaker) -> None:
         self.sessions = sessions
 
@@ -131,6 +133,7 @@ class LlamaIndexSentenceReranker:
     async def rerank(
         self, query: str, candidates: Sequence[NodeWithScore], top_n: int
     ) -> list[NodeWithScore]:
+        """cross-encoder 对 RRF 融合后的 Top-10 候选做逐对重打分"""
         self.load(top_n)
         return await self._postprocessor.apostprocess_nodes(list(candidates), query_str=query)
 
@@ -151,7 +154,7 @@ class HybridRetrievalSnapshot:
 
 
 class PolicyHybridRetriever(BaseRetriever):
-    """实现 LlamaIndex Retriever 接口，但由 FastAPI 使用异步 aretrieve。"""
+    """混合检索，实现 LlamaIndex Retriever 接口，但由 FastAPI 使用异步 aretrieve。"""
 
     def __init__(
         self,
@@ -197,6 +200,7 @@ def reciprocal_rank_fusion(
     rrf_k: int = 60,
     keyword_hint: str | None = None,
 ) -> list[NodeWithScore]:
+    """RRF 根据排名将向量检索和词法检索结果融合。"""
     by_id: dict[str, NodeWithScore] = {}
     scores: dict[str, float] = {}
     maximum = 2 / (rrf_k + 1)
@@ -242,6 +246,7 @@ class RetrievalService:
         self.minimum_score = minimum_score
 
     async def search(self, request: SearchRequest) -> SearchResponse:
+        """检索具体实现"""
         started_at = time.perf_counter()
         self.retriever.keyword_hint = request.keyword_hint
         self.retriever.include_archived = request.include_archived
@@ -264,6 +269,7 @@ class RetrievalService:
 
     @staticmethod
     def _to_match(candidate: NodeWithScore) -> PolicyKnowledgeMatch:
+        """将 NodeWithScore 映射为 PolicyKnowledgeMatch"""
         metadata = candidate.node.metadata
         score = normalize_rerank_score(candidate.score)
         return PolicyKnowledgeMatch(

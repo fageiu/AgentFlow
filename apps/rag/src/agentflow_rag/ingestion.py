@@ -96,24 +96,29 @@ class IngestionService:
 
     async def ingest_file(self, path: Path, metadata: PolicyMetadata | None = None) -> IngestionResult:
         document = parse_policy_file(path, metadata)
+        # 1. 幂等检查：同一 policy_id+version 且 checksum 相同且已 indexed → 跳过
         existing = await self.repository.find_by_policy_version(
             document.metadata.policy_id, document.metadata.version
         )
         if existing and existing.checksum == document.checksum and existing.index_status == "indexed":
             return IngestionResult(existing.id, "unchanged", existing.node_count)
-
+        # 2. 开始索引
         stored = await self.repository.begin_index(document, str(path))
         try:
+            # 3. 构建节点
             nodes = build_policy_nodes(
                 document,
                 chunk_size=self.chunk_size,
                 chunk_overlap=self.chunk_overlap,
             )
+            # 4. 存入向量库 + 词法表
             await self.node_store.add(stored.id, nodes)
+            # 5. 标记索引完成（同时切换版本 is_current）
             await self.repository.complete_index(stored.id, len(nodes))
             if existing and existing.id != stored.id:
                 await self.node_store.delete_document(existing.id)
         except Exception as error:
+            # 失败时清理已写入的 Node
             await self.node_store.delete_document(stored.id)
             await self.repository.fail_index(stored.id, str(error))
             raise

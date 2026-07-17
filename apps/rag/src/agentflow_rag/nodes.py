@@ -15,6 +15,7 @@ HEADING_PATTERN = re.compile(r"(?m)^#{1,6}\s+(.+)$")
 
 
 def _section_for_text(text: str) -> str | None:
+    '""从文本中提取 Markdown 标题作为 section。"""'
     match = HEADING_PATTERN.search(text)
     return match.group(1).strip() if match else None
 
@@ -30,6 +31,7 @@ def build_policy_nodes(
     chunk_overlap: int = 80,
 ) -> list[BaseNode]:
     ref_doc_id = build_document_ref_id(document)
+    # 构建语料库
     llama_documents: list[Document] = []
     for page in document.pages:
         metadata = {
@@ -40,8 +42,10 @@ def build_policy_nodes(
         }
         llama_documents.append(Document(text=page.text, metadata=metadata, id_=ref_doc_id))
 
+    # 分块
     splitter = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     nodes = splitter.get_nodes_from_documents(llama_documents, show_progress=False)
+    # 为每个节点分配稳定 ID + section
     for ordinal, node in enumerate(nodes):
         node.metadata["section"] = _section_for_text(node.text)
         node.metadata["ordinal"] = ordinal

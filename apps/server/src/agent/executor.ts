@@ -433,6 +433,7 @@ async function buildToolStep(run: AgentRun, index: number, toolCall: LlmToolCall
     throw new ToolNotAvailableError(toolName);
   }
 
+  // 执行工具
   const measured = await measureStep(() => runTool(toolName, toolCall.arguments, {
     runId: run.id,
     signal: getRunAbortSignal(run.id),
@@ -577,7 +578,7 @@ async function buildPlanningTicketContextStep(run: AgentRun, index: number) {
     arguments: { ticketId },
   };
   const result = await buildToolStep(run, index, toolCall);
-  result.step.title = "读取工单上下文（用于制定计划）";
+  result.step.title = "读取工单详情（用于制定计划）";
 
   return {
     ticket: result.output,
@@ -1315,10 +1316,11 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
       return;
     }
 
-    // 当前计划状态只对本轮生效，不写入长期历史，避免旧步骤以 system 角色不断累积。
+    // 截取本轮消息（只传当前步骤+计划，不累积旧 system 消息）
     const currentTurnMessages = buildCurrentTurnMessages(messages, activePlanStep, activePlan);
     // 每轮只向模型暴露当前步骤授权的工具，避免依赖文字提示阻止越权调用。
     const activeTools = tools.filter((tool) => activePlanStep?.allowedTools.includes(tool.name));
+    // 向LLM发起工具调用请求，并接收其工具调用决策
     const assistant = await measureStep(() =>
       generateChat({
         messages: currentTurnMessages,

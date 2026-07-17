@@ -15,6 +15,7 @@ class Base(DeclarativeBase):
 
 
 class KnowledgeDocumentModel(Base):
+    """文档元数据表"""
     __tablename__ = "knowledge_documents"
 
     id: Mapped[str] = mapped_column(String(160), primary_key=True)
@@ -40,6 +41,7 @@ class KnowledgeDocumentModel(Base):
 
 
 class KnowledgeLexicalNodeModel(Base):
+    """中文词法索引表"""
     __tablename__ = "knowledge_lexical_nodes"
 
     node_id: Mapped[str] = mapped_column(String(64), primary_key=True)

@@ -76,6 +76,7 @@ def parse_pdf(path: Path, metadata: PolicyMetadata) -> ParsedPolicyDocument:
 
 
 def parse_policy_file(path: Path, metadata: PolicyMetadata | None = None) -> ParsedPolicyDocument:
+    """解析政策文件"""
     suffix = path.suffix.lower()
     if suffix == ".md":
         return parse_markdown(path)

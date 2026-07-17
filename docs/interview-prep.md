@@ -537,7 +537,7 @@ try {
 
 | 环节 | 内容 |
 |------|------|
-| **Situation** | Agent 行为不稳定，改 Prompt 或执行器可能引入回归；只看最终回答无法判断工具轨迹和资金副作用是否正确，不同模型之间也难以做可比实验。 |
+| **Situation** | Agent 行为不稳定，改 Prompt 或执行器可能引入回归；只看最终回答无法判断工具轨迹和执行副作用是否正确，不同模型之间也难以做可比实验。 |
 | **Task** | 设计一套低成本、可重复、自动化的 Agent 评测体系，支持回归检测和多模型对比。 |
 | **Action** | 我先设计了 EvaluationCase 的契约结构——每条 case 定义 task、expectations（requiredTools、forbiddenTools、approval、final message、sandbox state）。然后实现了确定性评分器（EvaluationScorer），基于 run trace 和沙箱最终状态做规则化断言，不依赖 LLM Judge。评测 Runner 每次重新初始化沙箱、走真实执行路径、自动对比上一次运行结果并标记 regressed/recovered。我陆续写了 18 条 golden test case，覆盖 6 大能力组。最后在评测面板中增加了能力组筛选、单条 case 详情、断言诊断、A/B 对比等交互功能。 |
 | **Result** | 当前保存的 Mock 全量基线为 18/18，约 6.2 秒完成且没有模型 API 成本；DeepSeek 全量评测为 17/18，唯一异常是 Planner step 校验失败，修复后的单 Case 定向复测为 1/1。这个结果说明规则 Judge 能稳定定位失败，但不能消除真实模型本身的漂移。 |

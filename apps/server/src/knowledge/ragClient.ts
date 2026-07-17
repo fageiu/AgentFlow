@@ -119,6 +119,7 @@ function parseRetrieval(value: unknown): KnowledgeRetrievalMetrics {
   };
 }
 
+/** 解析rag搜索结果 */
 function parseSearchResult(value: unknown, requestedKeyword: string): PolicySearchResult {
   const record = asRecord(value);
   if (!record || !Array.isArray(record.matches) || record.matches.length === 0) {
@@ -140,6 +141,7 @@ function parseSearchResult(value: unknown, requestedKeyword: string): PolicySear
   };
 }
 
+/** mock模式使用本地沙箱数据 */
 function fixtureResult(keyword: string): PolicySearchResult {
   const policy = searchPolicyFixture(keyword);
   const citation: PolicyCitation = {
@@ -172,6 +174,7 @@ function fixtureResult(keyword: string): PolicySearchResult {
   };
 }
 
+/** 将远程错误代码映射到本地错误代码 */
 function mapRemoteCode(status: number, code: string | undefined): KnowledgeErrorCode {
   if (code === "KNOWLEDGE_INDEX_NOT_READY" || status === 503 && code?.includes("INDEX")) return "KNOWLEDGE_INDEX_NOT_READY";
   if (code === "KNOWLEDGE_NO_MATCH" || status === 404) return "KNOWLEDGE_NO_MATCH";
