@@ -5,9 +5,11 @@ from llama_index.core.schema import NodeWithScore, TextNode
 
 from agentflow_rag.errors import KnowledgeNoMatchError
 from agentflow_rag.retrieval import (
+    FastFusionReranker,
     IdentityReranker,
     PolicyHybridRetriever,
     RetrievalService,
+    build_lexical_websearch_query,
     reciprocal_rank_fusion,
 )
 from agentflow_rag.schemas import SearchRequest
@@ -62,6 +64,17 @@ def test_wrong_keyword_hint_does_not_filter_semantic_result() -> None:
     assert {item.node.metadata["policy_id"] for item in fused} == {"P-upgrade-001", "P-refund-001"}
 
 
+def test_lexical_query_uses_or_and_removes_duplicate_tokens() -> None:
+    query = build_lexical_websearch_query("核心接口中断两小时如何处理")
+
+    assert " OR " in query
+    tokens = query.split(" OR ")
+    assert len(tokens) == len(set(tokens))
+    assert all(token.strip() for token in tokens)
+    assert "如何" not in tokens
+    assert all(len(token) >= 2 for token in tokens)
+
+
 @pytest.mark.asyncio
 async def test_retrieval_service_returns_citations_and_metrics() -> None:
     match = candidate("refund", "P-refund-001", "refund", 0.9)
@@ -71,6 +84,7 @@ async def test_retrieval_service_returns_citations_and_metrics() -> None:
     response = await service.search(SearchRequest(query="VIP 客户如何退款"))
     assert response.matches[0].citation.node_id == "refund"
     assert response.matches[0].policy_id == "P-refund-001"
+    assert response.matches[0].rerank_score is None
     assert response.retrieval.vector_candidates == 1
     assert response.retrieval.lexical_candidates == 1
 
@@ -84,3 +98,27 @@ async def test_retrieval_service_rejects_low_confidence_result() -> None:
     with pytest.raises(KnowledgeNoMatchError):
         await service.search(SearchRequest(query="公司食堂供应什么"))
 
+
+@pytest.mark.asyncio
+async def test_fast_mode_deduplicates_nodes_from_same_document() -> None:
+    first = candidate("refund-1", "P-refund-001", "refund", 0.9)
+    second = candidate("refund-2", "P-refund-001", "refund", 0.8)
+    invoice = candidate("invoice", "P-invoice-001", "invoice", 0.7)
+    retriever = PolicyHybridRetriever(FakeSource([first, second, invoice]), FakeSource([]))
+    service = RetrievalService(retriever, IdentityReranker(), minimum_score=0.35)
+
+    response = await service.search(SearchRequest(query="退款与发票政策"))
+
+    assert [match.policy_id for match in response.matches] == ["P-refund-001", "P-invoice-001"]
+
+
+@pytest.mark.asyncio
+async def test_fast_fusion_reranker_prefers_stronger_vector_match() -> None:
+    semantic = candidate("semantic", "P-sla-001", "sla", 0.7)
+    semantic.node.metadata.update(vector_score=0.8, fusion_score=0.6)
+    lexical = candidate("lexical", "P-other", "other", 0.9)
+    lexical.node.metadata.update(vector_score=0.6, fusion_score=1.0)
+
+    result = await FastFusionReranker().rerank("服务中断", [lexical, semantic], 2)
+
+    assert [item.node.node_id for item in result] == ["semantic", "lexical"]

@@ -43,8 +43,9 @@ class SqlDocumentRepository:
         document_id = build_document_ref_id(document)
         metadata = document.metadata
         async with self.sessions.begin() as session:
-            session.add(
-                KnowledgeDocumentModel(
+            model = await session.get(KnowledgeDocumentModel, document_id)
+            if model is None:
+                model = KnowledgeDocumentModel(
                     id=document_id,
                     policy_id=metadata.policy_id,
                     keyword=metadata.keyword,
@@ -59,7 +60,14 @@ class SqlDocumentRepository:
                     index_status="indexing",
                     is_current=False,
                 )
-            )
+                session.add(model)
+            else:
+                # 同一校验和索引失败后允许安全重试，不因主键重复永久卡住 bundled 初始化。
+                model.source_path = source_path
+                model.index_status = "indexing"
+                model.node_count = 0
+                model.error_message = None
+                model.is_current = False
         return StoredDocument(document_id, document.checksum, "indexing")
 
     async def complete_index(self, document_id: str, node_count: int) -> None:

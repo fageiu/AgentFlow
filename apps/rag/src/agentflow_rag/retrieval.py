@@ -27,6 +27,25 @@ from .schemas import (
     SearchResponse,
 )
 
+LEXICAL_STOP_WORDS = {
+    "不会",
+    "什么",
+    "可以",
+    "只问",
+    "如何",
+    "应该",
+    "是否",
+    "标准",
+    "查询",
+    "规则",
+    "处理",
+    "多少",
+    "政策",
+    "怎么",
+    "要求",
+    "需要",
+}
+
 
 class AsyncCandidateSource(Protocol):
     async def retrieve(
@@ -35,6 +54,8 @@ class AsyncCandidateSource(Protocol):
 
 
 class CandidateReranker(Protocol):
+    enabled: bool
+
     async def rerank(
         self, query: str, candidates: Sequence[NodeWithScore], top_n: int
     ) -> list[NodeWithScore]: ...
@@ -83,8 +104,8 @@ class PostgresLexicalSource:
     async def retrieve(
         self, query: str, top_k: int, *, include_archived: bool = False
     ) -> list[NodeWithScore]:
-        tokens = " ".join(jieba.cut_for_search(query))
-        ts_query = func.plainto_tsquery("simple", tokens)
+        # 长句用 OR 组合分词，避免 plainto_tsquery 的全词 AND 让中文同义问法零召回。
+        ts_query = func.websearch_to_tsquery("simple", build_lexical_websearch_query(query))
         document_filters = [KnowledgeDocumentModel.index_status == "indexed"]
         if not include_archived:
             document_filters.extend(
@@ -118,6 +139,8 @@ class PostgresLexicalSource:
 class LlamaIndexSentenceReranker:
     """延迟导入 SentenceTransformer，保证健康检查和测试不触发模型下载。"""
 
+    enabled = True
+
     def __init__(self, model_name: str) -> None:
         from llama_index.postprocessor.sbert_rerank import SentenceTransformerRerank
 
@@ -139,11 +162,35 @@ class LlamaIndexSentenceReranker:
 
 
 class IdentityReranker:
+    enabled = False
+
     async def rerank(
         self, query: str, candidates: Sequence[NodeWithScore], top_n: int
     ) -> list[NodeWithScore]:
         del query
         return list(candidates[:top_n])
+
+
+class FastFusionReranker:
+    """CPU 在线模式以向量为主排序，RRF 只做小幅补召加分。"""
+
+    enabled = False
+
+    async def rerank(
+        self, query: str, candidates: Sequence[NodeWithScore], top_n: int
+    ) -> list[NodeWithScore]:
+        del query
+        rescored: list[NodeWithScore] = []
+        for candidate in candidates:
+            vector_score = _optional_score(candidate.node.metadata.get("vector_score")) or 0
+            fusion_score = _optional_score(candidate.node.metadata.get("fusion_score")) or 0
+            rescored.append(
+                NodeWithScore(
+                    node=candidate.node,
+                    score=0.9 * vector_score + 0.1 * fusion_score,
+                )
+            )
+        return sorted(rescored, key=lambda item: item.score or 0, reverse=True)[:top_n]
 
 
 @dataclass(slots=True)
@@ -223,6 +270,18 @@ def reciprocal_rank_fusion(
     return sorted(result, key=lambda item: item.score or 0, reverse=True)
 
 
+def build_lexical_websearch_query(query: str) -> str:
+    """将 jieba 结果转换为 PostgreSQL websearch OR 查询，并保持词序与去重。"""
+    tokens = list(
+        dict.fromkeys(
+            token
+            for raw_token in jieba.cut_for_search(query)
+            if len(token := raw_token.strip()) >= 2 and token not in LEXICAL_STOP_WORDS
+        )
+    )
+    return " OR ".join(tokens) or query
+
+
 def normalize_rerank_score(score: float | None) -> float:
     if score is None:
         return 0
@@ -239,11 +298,13 @@ class RetrievalService:
         *,
         rerank_top_n: int = 10,
         minimum_score: float = 0.35,
+        minimum_vector_score_without_reranker: float = 0.55,
     ) -> None:
         self.retriever = retriever
         self.reranker = reranker
         self.rerank_top_n = rerank_top_n
         self.minimum_score = minimum_score
+        self.minimum_vector_score_without_reranker = minimum_vector_score_without_reranker
 
     async def search(self, request: SearchRequest) -> SearchResponse:
         """检索具体实现"""
@@ -251,8 +312,27 @@ class RetrievalService:
         self.retriever.keyword_hint = request.keyword_hint
         self.retriever.include_archived = request.include_archived
         fused = await self.retriever.aretrieve(request.query)
+        if not self.reranker.enabled:
+            maximum_vector_score = max(
+                (_optional_score(item.node.metadata.get("vector_score")) or 0 for item in fused),
+                default=0,
+            )
+            if maximum_vector_score < self.minimum_vector_score_without_reranker:
+                raise KnowledgeNoMatchError(
+                    query_length=len(request.query),
+                    threshold=self.minimum_vector_score_without_reranker,
+                )
         reranked = await self.reranker.rerank(request.query, fused, self.rerank_top_n)
-        matches = [self._to_match(candidate) for candidate in reranked]
+        matches = [self._to_match(candidate, self.reranker.enabled) for candidate in reranked]
+        # 同一文档只保留最高分 Node，避免重复分块挤占 Top-K 的政策多样性。
+        seen_documents: set[str] = set()
+        unique_matches: list[PolicyKnowledgeMatch] = []
+        for match in matches:
+            if match.citation.document_id in seen_documents:
+                continue
+            seen_documents.add(match.citation.document_id)
+            unique_matches.append(match)
+        matches = unique_matches
         matches = [match for match in matches if match.score >= self.minimum_score][: request.top_k]
         if not matches:
             raise KnowledgeNoMatchError(query_length=len(request.query), threshold=self.minimum_score)
@@ -268,7 +348,7 @@ class RetrievalService:
         )
 
     @staticmethod
-    def _to_match(candidate: NodeWithScore) -> PolicyKnowledgeMatch:
+    def _to_match(candidate: NodeWithScore, reranker_applied: bool) -> PolicyKnowledgeMatch:
         """将 NodeWithScore 映射为 PolicyKnowledgeMatch"""
         metadata = candidate.node.metadata
         score = normalize_rerank_score(candidate.score)
@@ -281,7 +361,7 @@ class RetrievalService:
             vector_score=_optional_score(metadata.get("vector_score")),
             lexical_score=_optional_score(metadata.get("lexical_score")),
             fusion_score=float(metadata.get("fusion_score", 0)),
-            rerank_score=score,
+            rerank_score=score if reranker_applied else None,
             citation=PolicyCitation(
                 document_id=str(metadata["document_id"]),
                 node_id=candidate.node.node_id,

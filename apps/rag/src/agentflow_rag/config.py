@@ -24,6 +24,7 @@ class RagSettings(BaseSettings):
     bundled_policy_dir: Path = Path(__file__).resolve().parents[2] / "knowledge" / "policies"
     embedding_model: str = "BAAI/bge-m3"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    enable_reranker: bool = True
     embedding_dimension: int = 1024
     chunk_size: int = 512
     chunk_overlap: int = 80
@@ -32,6 +33,7 @@ class RagSettings(BaseSettings):
     rerank_top_n: int = 10
     result_top_k: int = 5
     minimum_score: float = 0.35
+    minimum_vector_score_without_reranker: float = 0.55
     rrf_k: int = 60
     max_upload_bytes: int = 10 * 1024 * 1024
     load_models: bool = True

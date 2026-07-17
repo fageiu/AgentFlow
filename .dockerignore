@@ -1,5 +1,12 @@
 .git
 .github
+.env
+.env.*
+!.env.example
+.agents
+.logs
+.pnpm-store
+tmp
 .agentflow-data
 .agentflow-artifacts
 .rag-data

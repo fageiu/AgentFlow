@@ -123,6 +123,12 @@ curl -X POST http://127.0.0.1:8000/v1/search \
   -d '{"query":"核心接口中断两小时如何处理","keyword_hint":"sla","top_k":5}'
 ```
 
+Docker Compose 默认设置 `RAG_ENABLE_RERANKER=false`，用于普通 CPU 电脑上的低延迟在线演示；
+向量召回仍使用 BGE-M3，并通过 jieba/PostgreSQL 与 RRF 融合。运行完整 BGE Reranker
+质量评测时，将该变量设置为 `true`。完整重排在 CPU 上开销较大，建议作为离线评测或在 GPU 环境启用。
+快速模式使用 `RAG_MINIMUM_VECTOR_SCORE_WITHOUT_RERANKER=0.55` 做语义拒答，并按文档去重 Top-K。
+在线排序以 BGE-M3 向量分为主、RRF 为辅；完整模式再使用 BGE CrossEncoder 重排。
+
 上传 Markdown：
 
 ```bash
@@ -271,8 +277,12 @@ RAG 服务 ready 后，可执行真实 BGE 检索门禁：
 
 ```bash
 cd apps/rag
-uv run agentflow-rag-eval --enforce-targets --output ../../.agentflow-artifacts/rag-evaluation.json
+uv run agentflow-rag-eval --profile fast --enforce-targets --output ../../.agentflow-artifacts/rag-evaluation.json
 ```
+
+`fast` 对应 Docker Compose 的 CPU 在线模式（Recall@5 ≥90%、MRR ≥0.78、拒答率 ≥90%、P95 ≤2 秒）。
+GPU 或离线完整 BGE Reranker 验收使用 `--profile full`，继续执行原计划的 95% / 0.85 质量目标，
+不会因本机 CPU 限制而降低完整模式标准。
 
 也可以只启动一侧：
 

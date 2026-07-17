@@ -40,6 +40,34 @@ def make_document(policy_id: str, version: str, effective_date: date, status: st
 
 
 @pytest.mark.asyncio
+async def test_failed_document_can_retry_same_checksum() -> None:
+    assert DATABASE_URL
+    engine = create_engine(DATABASE_URL)
+    sessions = create_session_factory(engine)
+    repository = SqlDocumentRepository(sessions)
+    policy_id = f"POL-RETRY-{uuid4().hex[:10]}"
+    document = make_document(policy_id, "1.0", date(2026, 1, 1), "active")
+    try:
+        first = await repository.begin_index(document, "first.md")
+        await repository.fail_index(first.id, "embedding failed")
+        retried = await repository.begin_index(document, "retry.md")
+
+        assert retried.id == first.id
+        async with sessions() as session:
+            model = await session.get(KnowledgeDocumentModel, retried.id)
+        assert model is not None
+        assert model.index_status == "indexing"
+        assert model.error_message is None
+        assert model.source_path == "retry.md"
+    finally:
+        async with sessions.begin() as session:
+            await session.execute(
+                delete(KnowledgeDocumentModel).where(KnowledgeDocumentModel.policy_id == policy_id)
+            )
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_latest_active_version_is_current_independent_of_import_order() -> None:
     assert DATABASE_URL
     engine = create_engine(DATABASE_URL)

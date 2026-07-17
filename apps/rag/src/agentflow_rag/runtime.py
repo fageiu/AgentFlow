@@ -17,6 +17,7 @@ from .database import KnowledgeDocumentModel, create_database_probe, create_engi
 from .health import ReadinessService
 from .ingestion import IngestionService
 from .retrieval import (
+    FastFusionReranker,
     LlamaIndexSentenceReranker,
     LlamaIndexVectorSource,
     PolicyHybridRetriever,
@@ -71,8 +72,14 @@ async def initialize_runtime(
             model_name=settings.embedding_model,
             cache_folder=str(settings.model_cache_dir),
         )
-        reranker = LlamaIndexSentenceReranker(settings.reranker_model)
-        await asyncio.to_thread(reranker.load, settings.rerank_top_n)
+        if settings.enable_reranker:
+            reranker = LlamaIndexSentenceReranker(settings.reranker_model)
+            await asyncio.to_thread(reranker.load, settings.rerank_top_n)
+            candidate_top_n = settings.rerank_top_n
+        else:
+            # CPU 演示模式保留混合召回与分数契约，完整 BGE 重排由真实评测配置启用。
+            reranker = FastFusionReranker()
+            candidate_top_n = max(settings.vector_top_k, settings.lexical_top_k)
         readiness.set_models_ready(True)
     except Exception as error:
         readiness.set_models_ready(False, type(error).__name__)
@@ -86,6 +93,7 @@ async def initialize_runtime(
         ingestion = IngestionService(
             repository,
             node_store,
+            embed_model,
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
         )
@@ -113,13 +121,14 @@ async def initialize_runtime(
             vector_top_k=settings.vector_top_k,
             lexical_top_k=settings.lexical_top_k,
             rrf_k=settings.rrf_k,
-            fusion_top_n=settings.rerank_top_n,
+            fusion_top_n=candidate_top_n,
         )
         app.state.retrieval = RetrievalService(
             retriever,
             reranker,
-            rerank_top_n=settings.rerank_top_n,
+            rerank_top_n=candidate_top_n,
             minimum_score=settings.minimum_score,
+            minimum_vector_score_without_reranker=settings.minimum_vector_score_without_reranker,
         )
         app.state.admin = admin
         indexed_count = await _indexed_document_count(sessions)

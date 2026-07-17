@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from llama_index.core.schema import BaseNode
+from llama_index.core.schema import BaseNode, MetadataMode
 
 from .documents import parse_policy_file
 from .nodes import build_document_ref_id, build_policy_nodes
@@ -36,6 +36,17 @@ class NodeStore(Protocol):
     async def add(self, document_id: str, nodes: Sequence[BaseNode]) -> None: ...
 
     async def delete_document(self, document_id: str) -> None: ...
+
+
+class EmbeddingModel(Protocol):
+    """摄取流程只依赖 LlamaIndex Embedding 的异步批量接口。"""
+
+    async def aget_text_embedding_batch(
+        self,
+        texts: list[str],
+        *,
+        show_progress: bool = False,
+    ) -> list[list[float]]: ...
 
 
 @dataclass(slots=True)
@@ -85,12 +96,14 @@ class IngestionService:
         self,
         repository: DocumentRepository,
         node_store: NodeStore,
+        embedding_model: EmbeddingModel,
         *,
         chunk_size: int = 512,
         chunk_overlap: int = 80,
     ) -> None:
         self.repository = repository
         self.node_store = node_store
+        self.embedding_model = embedding_model
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
@@ -111,9 +124,21 @@ class IngestionService:
                 chunk_size=self.chunk_size,
                 chunk_overlap=self.chunk_overlap,
             )
-            # 4. 存入向量库 + 词法表
+            # 4. PGVectorStore 只负责持久化，写入前必须显式为每个 Node 生成向量。
+            texts = [node.get_content(metadata_mode=MetadataMode.EMBED) for node in nodes]
+            embeddings = await self.embedding_model.aget_text_embedding_batch(
+                texts,
+                show_progress=False,
+            )
+            if len(embeddings) != len(nodes):
+                raise ValueError(
+                    f"Embedding count mismatch: expected {len(nodes)}, got {len(embeddings)}"
+                )
+            for node, embedding in zip(nodes, embeddings, strict=True):
+                node.embedding = embedding
+            # 5. 存入向量库 + 词法表
             await self.node_store.add(stored.id, nodes)
-            # 5. 标记索引完成（同时切换版本 is_current）
+            # 6. 标记索引完成（同时切换版本 is_current）
             await self.repository.complete_index(stored.id, len(nodes))
             if existing and existing.id != stored.id:
                 await self.node_store.delete_document(existing.id)

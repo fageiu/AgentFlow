@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from agentflow_rag.errors import KnowledgeNoMatchError
-from agentflow_rag.evaluation import evaluate_queries
+from agentflow_rag.evaluation import RetrievalEvaluationSummary, evaluate_queries, passes_targets
 from agentflow_rag.schemas import (
     KnowledgeRetrievalMetrics,
     PolicyCitation,
@@ -57,3 +57,18 @@ async def test_evaluation_calculates_recall_mrr_and_no_answer(tmp_path: Path) ->
     assert summary.mrr == 1
     assert summary.no_answer_accuracy == 1
 
+
+def test_fast_and_full_profiles_keep_separate_quality_gates() -> None:
+    summary = RetrievalEvaluationSummary(
+        total=50,
+        recall_at_5=0.90,
+        mrr=0.79,
+        no_answer_accuracy=1.0,
+        fusion_top1_accuracy=0.65,
+        reranker_top1_accuracy=0.65,
+        average_duration_ms=800,
+        p95_duration_ms=1200,
+    )
+
+    assert passes_targets(summary, "fast") is True
+    assert passes_targets(summary, "full") is False

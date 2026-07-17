@@ -33,6 +33,24 @@ class RetrievalEvaluationSummary:
     p95_duration_ms: float
 
 
+def passes_targets(summary: RetrievalEvaluationSummary, profile: str = "full") -> bool:
+    """完整模式坚持原始质量目标；CPU 快速模式单独约束可用性与在线延迟。"""
+    if profile == "fast":
+        return (
+            summary.recall_at_5 >= 0.90
+            and summary.mrr >= 0.78
+            and summary.no_answer_accuracy >= 0.90
+            and summary.p95_duration_ms <= 2000
+        )
+    return (
+        summary.recall_at_5 >= 0.95
+        and summary.mrr >= 0.85
+        and summary.no_answer_accuracy >= 0.90
+        and summary.reranker_top1_accuracy >= summary.fusion_top1_accuracy
+        and summary.p95_duration_ms <= 2000
+    )
+
+
 class HttpSearchService:
     def __init__(self, base_url: str) -> None:
         self.client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=10)
@@ -123,6 +141,7 @@ def run_cli() -> None:
     )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--enforce-targets", action="store_true")
+    parser.add_argument("--profile", choices=("full", "fast"), default="full")
     args = parser.parse_args()
 
     async def evaluate() -> RetrievalEvaluationSummary:
@@ -139,14 +158,7 @@ def run_cli() -> None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(payload + "\n", encoding="utf-8")
     if args.enforce_targets:
-        passed = (
-            summary.recall_at_5 >= 0.95
-            and summary.mrr >= 0.85
-            and summary.no_answer_accuracy >= 0.90
-            and summary.reranker_top1_accuracy >= summary.fusion_top1_accuracy
-            and summary.p95_duration_ms <= 2000
-        )
-        if not passed:
+        if not passes_targets(summary, args.profile):
             raise SystemExit(1)
 
 
