@@ -218,7 +218,22 @@ async function requestChatCompletion(config: LlmConfig, body: Record<string, unk
 /** Mock Planner 也输出与真实模型一致的结构化计划，保证本地演示走同一授权链路。 */
 function buildMockPlan(task: string) {
   const queryTask = isTicketQueryTask(task);
+  const policyKnowledgeTask = isPolicyKnowledgeTask(task);
   const refundTask = isRefundTask(task);
+
+  if (policyKnowledgeTask) {
+    return {
+      version: 1,
+      summary: "只读检索政策知识库并返回可信依据。",
+      steps: [{
+        id: "read-policy",
+        title: "检索政策知识库",
+        objective: "根据用户问题检索适用政策，不产生业务写入。",
+        allowedTools: ["searchPolicy"],
+        requiresApproval: false,
+      }],
+    };
+  }
 
   if (queryTask) {
     const searchArgs = createTicketSearchArgs(task);
@@ -584,7 +599,13 @@ function extractTicketId(task: string) {
 }
 
 function isTicketQueryTask(task: string) {
-  return /查询|列出|查看|筛选|统计|所有工单|工单列表|哪些工单/.test(task) && !/处理工单\s*T-\d+/i.test(task);
+  return /工单/i.test(task)
+    && /查询|列出|查看|筛选|统计|所有工单|工单列表|哪些工单/.test(task)
+    && !/处理工单\s*T-\d+/i.test(task);
+}
+
+function isPolicyKnowledgeTask(task: string) {
+  return !/工单|T-\d+/i.test(task) && /政策|规则|知识库|SLA|时限|补偿/i.test(task);
 }
 
 function isRefundTask(task: string) {
@@ -678,6 +699,24 @@ function formatTicketList(tickets: Array<Record<string, unknown>> | undefined) {
 function buildMockChatMessage(input: GenerateChatInput, errorMessage?: string): GenerateChatResult["message"] {
   const task = input.executionContext?.task ?? extractUserTask(input.messages);
   const isQueryTask = isTicketQueryTask(task);
+  const policyKnowledgeTask = isPolicyKnowledgeTask(task);
+
+  if (policyKnowledgeTask) {
+    const policyKeyword = createPolicyKeyword(task, input.messages);
+    if (!hasToolOutput(input.messages, "searchPolicy")) {
+      return { toolCalls: [createMockToolCall("searchPolicy", { keyword: policyKeyword })] };
+    }
+
+    const policy = parseToolOutput(input.messages, "searchPolicy");
+    return {
+      content: [
+        `已检索政策知识库：${String(policy?.title ?? "命中适用政策")}。`,
+        String(policy?.content ?? "请以检索返回的政策正文和引用为准。"),
+        "本次为只读知识查询，未执行退款、审批或工单状态变更。",
+        errorMessage ? `[Mock fallback: ${errorMessage}]` : "",
+      ].filter(Boolean).join("\n"),
+    };
+  }
 
   if (isQueryTask) {
     const searchArgs = createTicketSearchArgs(task);

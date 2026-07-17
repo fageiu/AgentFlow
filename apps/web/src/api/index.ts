@@ -171,7 +171,8 @@ export function createAgentRunStreamUrl(params: {
   userMessageId: string;
   assistantMessageId: string;
 }) {
-  const url = new URL(`${API_BASE_URL}/agent/run/stream`);
+  // Docker 部署使用相对 API 基址 `/api`；URL 构造器需要页面 origin 才能生成合法的 SSE 地址。
+  const url = new URL(`${API_BASE_URL}/agent/run/stream`, window.location.origin);
   url.searchParams.set("task", params.task);
   url.searchParams.set("conversationId", params.conversationId);
   url.searchParams.set("userMessageId", params.userMessageId);

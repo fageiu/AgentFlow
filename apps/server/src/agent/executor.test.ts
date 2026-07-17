@@ -83,6 +83,48 @@ test("预读取工单上下文的首轮计划仍应使用 Planner 角色", async
   assert.ok(prompt.system.includes("禁止规划 createRefund 或 updateTicketStatus"));
 });
 
+test("纯政策知识查询不得被确定性补全改写为工单列表", async () => {
+  const { completeInitialPlanCoverage } = await import("./executor.js");
+  const policyPlan = {
+    version: 1 as const,
+    summary: "检索 SLA 政策",
+    steps: [{
+      id: "policy",
+      title: "检索 SLA 政策",
+      objective: "查询 SLA 首响与补偿口径",
+      allowedTools: ["searchPolicy" as const],
+      requiresApproval: false,
+    }],
+  };
+
+  const completed = completeInitialPlanCoverage(
+    policyPlan,
+    "查询企业客户核心接口中断时的 SLA 首次响应时限和补偿政策",
+    false,
+  );
+
+  assert.deepEqual(completed.steps.map((step) => step.allowedTools[0]), ["searchPolicy"]);
+});
+
+test("明确的工单集合查询仍应确定性使用 listTickets", async () => {
+  const { completeInitialPlanCoverage } = await import("./executor.js");
+  const modelPlan = {
+    version: 1 as const,
+    summary: "模型误选政策检索",
+    steps: [{
+      id: "policy",
+      title: "检索政策",
+      objective: "检索政策",
+      allowedTools: ["searchPolicy" as const],
+      requiresApproval: false,
+    }],
+  };
+
+  const completed = completeInitialPlanCoverage(modelPlan, "查询所有工单", false);
+
+  assert.deepEqual(completed.steps.map((step) => step.allowedTools[0]), ["listTickets"]);
+});
+
 test("Replanner Prompt 应明确要求首先重试失败工具", async () => {
   const { buildPlanPrompt } = await import("../llm/prompts.js");
   const prompt = buildPlanPrompt("处理工单 T-1001", {
@@ -190,6 +232,31 @@ test("Mock Tool Calling 应读取结构化执行上下文而不依赖 Prompt 固
 
   assert.equal(result.message.toolCalls?.[0]?.name, "getCustomer");
   assert.equal(result.message.toolCalls?.[0]?.arguments.customerId, "C-9006");
+});
+
+test("Mock Tool Calling 对纯政策问题应直接调用 searchPolicy", async () => {
+  const { generateChat } = await import("../llm/provider.js");
+  const plan = {
+    version: 1 as const,
+    summary: "查询 SLA 政策",
+    steps: [{
+      id: "policy",
+      title: "查询 SLA 政策",
+      objective: "查询首次响应时限和补偿口径",
+      allowedTools: ["searchPolicy" as const],
+    }],
+  };
+  const result = await generateChat({
+    messages: [{ role: "user", content: "查询 SLA 首次响应时限和补偿政策" }],
+    executionContext: {
+      task: "查询 SLA 首次响应时限和补偿政策",
+      plan,
+      activePlanStep: plan.steps[0],
+    },
+  });
+
+  assert.equal(result.message.toolCalls?.[0]?.name, "searchPolicy");
+  assert.equal(result.message.toolCalls?.[0]?.arguments.keyword, "sla");
 });
 
 test("Tool Calling 初始消息只包含稳定约束和业务事实，不再序列化动态计划", async () => {

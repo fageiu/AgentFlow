@@ -601,8 +601,10 @@ const defaultPlanStepDefinitions = {
  * “处理工单”默认完成完整业务核查，不能因 Planner 忽略任务细节而退化成只查一张工单。
  * 默认只补齐核查步骤；用户明确提出的业务动作由 Planner 保留，避免把请求压缩成固定脚本。
  */
-function completeInitialPlanCoverage(plan: AgentPlan, task: string, hasTicketContext: boolean): AgentPlan {
-  if (!extractProcessTicketId(task) && /查询|列出|查看|筛选|统计|工单列表|哪些工单/.test(task)) {
+export function completeInitialPlanCoverage(plan: AgentPlan, task: string, hasTicketContext: boolean): AgentPlan {
+  // 只有明确查询“工单”集合时才覆盖 Planner；政策、规则和 SLA 查询必须保留 searchPolicy 计划。
+  const isTicketCollectionQuery = /工单/i.test(task) && /查询|列出|查看|筛选|统计|工单列表|哪些工单/.test(task);
+  if (!extractProcessTicketId(task) && isTicketCollectionQuery) {
     const requiresFilter = /高优先级|中优先级|低优先级|高优|中优|低优|客户\s*C-\d+|待审批|等待审批|已关闭|已拒绝|状态为/i.test(task);
     const toolName = requiresFilter ? "searchTickets" : "listTickets";
 

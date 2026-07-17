@@ -19,6 +19,7 @@ export function buildPlanPrompt(task: string, input?: {
       "每个执行步骤只能授权一个工具；可用工具只有 listTickets、searchTickets、getTicket、getCustomer、getOrder、searchPolicy、createRefund、updateTicketStatus。",
       "此 Planner 只规划读取和核查步骤，禁止规划 createRefund 或 updateTicketStatus；写入动作由证据齐备后的 Action Planner 单独决定。",
       "查询、列出、筛选或统计工单时，只规划 listTickets 或 searchTickets，禁止 createRefund 和 updateTicketStatus。",
+      "查询政策、规则、知识库、SLA 时限或补偿口径时，只规划 searchPolicy；除非用户明确要求查询工单，否则禁止规划 listTickets 或 searchTickets。",
       input?.ticketContext
         ? "已提供真实工单上下文：不得重复规划 getTicket；根据其中的 customerId、orderId 和诉求继续规划 getCustomer、getOrder、searchPolicy。"
         : "处理单张工单时，按需规划 getTicket、getCustomer、getOrder、searchPolicy；不得提前规划任何写入。",

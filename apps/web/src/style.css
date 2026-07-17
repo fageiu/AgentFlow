@@ -1871,13 +1871,20 @@ button:disabled {
 }
 
 .plan-tool-detail summary::before {
-  content: "›";
+  content: "";
+  width: 6px;
+  height: 6px;
+  box-sizing: border-box;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
   color: #94a3b8;
+  flex: 0 0 auto;
+  transform: rotate(-45deg);
   transition: transform 0.15s ease;
 }
 
 .plan-tool-detail[open] summary::before {
-  transform: rotate(90deg);
+  transform: rotate(45deg);
 }
 
 .plan-tool-detail summary small {
@@ -2188,7 +2195,7 @@ button:disabled {
 
 .agent-final-message > p::before,
 .agent-final-more > p::before {
-  content: "›";
+  content: ">";
   position: absolute;
   left: 0;
   color: #0f766e;

@@ -54,7 +54,8 @@ services:
       PORT: 3001
       RAG_MODE: service
       RAG_BASE_URL: http://rag:8000
-      RAG_REQUEST_TIMEOUT_MS: 3000
+      # 本地 CPU 首次/闲置后检索可能需要十余秒；生产代码默认值仍保持 3 秒。
+      RAG_REQUEST_TIMEOUT_MS: 15000
       RAG_MAX_RETRIES: 1
       LLM_MOCK: ${LLM_MOCK:-true}
       LLM_FALLBACK_ON_ERROR: ${LLM_FALLBACK_ON_ERROR:-true}
