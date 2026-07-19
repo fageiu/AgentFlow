@@ -6,7 +6,7 @@ import argparse
 import asyncio
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from statistics import mean
 from typing import Protocol
@@ -14,7 +14,7 @@ from typing import Protocol
 import httpx
 
 from .errors import KnowledgeNoMatchError
-from .schemas import SearchRequest, SearchResponse
+from .schemas import RetrievalCandidateTrace, SearchRequest, SearchResponse
 
 
 class SearchService(Protocol):
@@ -31,19 +31,54 @@ class RetrievalEvaluationSummary:
     reranker_top1_accuracy: float
     average_duration_ms: float
     p95_duration_ms: float
+    error_count: int = 0
+    diagnosis_counts: dict[str, int] = field(default_factory=dict)
+    cases: list[RetrievalEvaluationCase] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class RetrievalEvaluationCase:
+    """单条 Golden Query 的真实阶段排名和命中诊断。"""
+
+    case_id: str
+    query: str
+    expected_policy_ids: list[str]
+    answerable: bool
+    actual_policy_ids: list[str]
+    fusion_ranking: list[dict[str, object]]
+    reranked_ranking: list[dict[str, object]]
+    recall_at_5: float | None
+    reciprocal_rank: float | None
+    no_answer_correct: bool | None
+    duration_ms: int | None
+    error: str | None = None
+    failure_diagnostics: list[RetrievalFailureDiagnosis] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class RetrievalFailureDiagnosis:
+    """解释目标政策是在召回、排序还是 Top-1 阶段丢失。"""
+
+    category: str
+    policy_id: str
+    fusion_rank: int | None
+    reranked_rank: int | None
+    detail: str
 
 
 def passes_targets(summary: RetrievalEvaluationSummary, profile: str = "full") -> bool:
     """完整模式坚持原始质量目标；CPU 快速模式单独约束可用性与在线延迟。"""
     if profile == "fast":
         return (
-            summary.recall_at_5 >= 0.90
+            summary.error_count == 0
+            and summary.recall_at_5 >= 0.90
             and summary.mrr >= 0.78
             and summary.no_answer_accuracy >= 0.90
             and summary.p95_duration_ms <= 2000
         )
     return (
-        summary.recall_at_5 >= 0.95
+        summary.error_count == 0
+        and summary.recall_at_5 >= 0.95
         and summary.mrr >= 0.85
         and summary.no_answer_accuracy >= 0.90
         and summary.reranker_top1_accuracy >= summary.fusion_top1_accuracy
@@ -79,6 +114,60 @@ def percentile_95(values: list[int]) -> float:
     return float(ordered[index])
 
 
+def classify_retrieval_failures(
+    expected: set[str],
+    actual: list[str],
+    fusion_ranking: list[RetrievalCandidateTrace],
+    reranked_ranking: list[RetrievalCandidateTrace],
+) -> list[RetrievalFailureDiagnosis]:
+    """基于真实阶段排名分类失败，禁止从最终 Top-K 反推召回过程。"""
+    fusion_positions = _first_policy_positions(fusion_ranking)
+    reranked_positions = _first_policy_positions(reranked_ranking)
+    diagnostics: list[RetrievalFailureDiagnosis] = []
+    for policy_id in sorted(expected.difference(actual)):
+        fusion_rank = fusion_positions.get(policy_id)
+        reranked_rank = reranked_positions.get(policy_id)
+        if fusion_rank is None:
+            category = "not_recalled"
+            detail = "目标政策未进入融合候选池"
+        else:
+            category = "ranking_dropped"
+            detail = "目标政策已召回，但未进入最终 Top-5"
+        diagnostics.append(
+            RetrievalFailureDiagnosis(
+                category=category,
+                policy_id=policy_id,
+                fusion_rank=fusion_rank,
+                reranked_rank=reranked_rank,
+                detail=detail,
+            )
+        )
+
+    if reranked_ranking and reranked_ranking[0].policy_id not in expected:
+        fusion_top_is_correct = bool(fusion_ranking and fusion_ranking[0].policy_id in expected)
+        diagnostics.append(
+            RetrievalFailureDiagnosis(
+                category="top1_regression" if fusion_top_is_correct else "top1_incorrect",
+                policy_id=reranked_ranking[0].policy_id,
+                fusion_rank=fusion_positions.get(reranked_ranking[0].policy_id),
+                reranked_rank=1,
+                detail=(
+                    "排序阶段把正确的融合 Top-1 替换为非目标政策"
+                    if fusion_top_is_correct
+                    else "排序后的 Top-1 不属于目标政策"
+                ),
+            )
+        )
+    return diagnostics
+
+
+def _first_policy_positions(ranking: list[RetrievalCandidateTrace]) -> dict[str, int]:
+    positions: dict[str, int] = {}
+    for item in ranking:
+        positions.setdefault(item.policy_id, item.rank)
+    return positions
+
+
 async def evaluate_queries(service: SearchService, query_path: Path) -> RetrievalEvaluationSummary:
     # Golden Query 文件读取属于阻塞 I/O，避免占用检索服务事件循环。
     query_text = await asyncio.to_thread(query_path.read_text, encoding="utf-8")
@@ -89,6 +178,8 @@ async def evaluate_queries(service: SearchService, query_path: Path) -> Retrieva
     fusion_top1_results: list[bool] = []
     reranker_top1_results: list[bool] = []
     durations: list[int] = []
+    case_results: list[RetrievalEvaluationCase] = []
+    error_count = 0
 
     for case in cases:
         expected = set(case["expected_policy_ids"])
@@ -99,28 +190,122 @@ async def evaluate_queries(service: SearchService, query_path: Path) -> Retrieva
                     keyword_hint=case.get("keyword_hint"),
                     top_k=10,
                     include_archived=case.get("include_archived", False),
+                    include_diagnostics=True,
                 )
             )
             actual = [item.policy_id for item in result.matches[:5]]
             durations.append(result.retrieval.duration_ms)
+            case_recall: float | None = None
+            case_reciprocal_rank: float | None = None
+            no_answer_correct: bool | None = None
             if expected:
-                recalls.append(len(expected.intersection(actual)) / len(expected))
+                case_recall = len(expected.intersection(actual)) / len(expected)
+                recalls.append(case_recall)
                 rank = next((index for index, policy_id in enumerate(actual, 1) if policy_id in expected), 0)
-                reciprocal_ranks.append(1 / rank if rank else 0)
-                reranker_top1_results.append(bool(actual and actual[0] in expected))
-                fusion_top = max(
-                    result.matches,
-                    key=lambda item: item.fusion_score if item.fusion_score is not None else item.score,
+                case_reciprocal_rank = 1 / rank if rank else 0
+                reciprocal_ranks.append(case_reciprocal_rank)
+                fusion_ranking = result.retrieval.fusion_ranking
+                reranked_ranking = result.retrieval.reranked_ranking
+                fusion_top1_results.append(
+                    bool(fusion_ranking and fusion_ranking[0].policy_id in expected)
                 )
-                fusion_top1_results.append(fusion_top.policy_id in expected)
+                reranker_top1_results.append(
+                    bool(reranked_ranking and reranked_ranking[0].policy_id in expected)
+                )
             else:
+                no_answer_correct = False
                 no_answer_results.append(False)
+            failure_diagnostics = (
+                classify_retrieval_failures(
+                    expected,
+                    actual,
+                    result.retrieval.fusion_ranking,
+                    result.retrieval.reranked_ranking,
+                )
+                if expected
+                else []
+            )
+            case_results.append(
+                RetrievalEvaluationCase(
+                    case_id=str(case.get("id", case["query"])),
+                    query=case["query"],
+                    expected_policy_ids=case["expected_policy_ids"],
+                    answerable=bool(case["answerable"]),
+                    actual_policy_ids=actual,
+                    fusion_ranking=[item.model_dump() for item in result.retrieval.fusion_ranking],
+                    reranked_ranking=[item.model_dump() for item in result.retrieval.reranked_ranking],
+                    recall_at_5=case_recall,
+                    reciprocal_rank=case_reciprocal_rank,
+                    no_answer_correct=no_answer_correct,
+                    duration_ms=result.retrieval.duration_ms,
+                    failure_diagnostics=failure_diagnostics,
+                )
+            )
         except KnowledgeNoMatchError:
+            case_recall = None
+            case_reciprocal_rank = None
+            no_answer_correct = None
+            if expected:
+                case_recall = 0
+                case_reciprocal_rank = 0
+                recalls.append(case_recall)
+                reciprocal_ranks.append(case_reciprocal_rank)
+            else:
+                no_answer_correct = True
+                no_answer_results.append(True)
+            case_results.append(
+                RetrievalEvaluationCase(
+                    case_id=str(case.get("id", case["query"])),
+                    query=case["query"],
+                    expected_policy_ids=case["expected_policy_ids"],
+                    answerable=bool(case["answerable"]),
+                    actual_policy_ids=[],
+                    fusion_ranking=[],
+                    reranked_ranking=[],
+                    recall_at_5=case_recall,
+                    reciprocal_rank=case_reciprocal_rank,
+                    no_answer_correct=no_answer_correct,
+                    duration_ms=None,
+                    failure_diagnostics=(
+                        classify_retrieval_failures(expected, [], [], []) if expected else []
+                    ),
+                )
+            )
+        except httpx.HTTPError as error:
+            # 单条外部请求失败应进入报告并阻断门禁，不能丢弃此前已经完成的 Case。
+            error_count += 1
             if expected:
                 recalls.append(0)
                 reciprocal_ranks.append(0)
+                case_recall = 0.0
+                case_reciprocal_rank = 0.0
+                no_answer_correct = None
             else:
-                no_answer_results.append(True)
+                no_answer_results.append(False)
+                case_recall = None
+                case_reciprocal_rank = None
+                no_answer_correct = False
+            case_results.append(
+                RetrievalEvaluationCase(
+                    case_id=str(case.get("id", case["query"])),
+                    query=case["query"],
+                    expected_policy_ids=case["expected_policy_ids"],
+                    answerable=bool(case["answerable"]),
+                    actual_policy_ids=[],
+                    fusion_ranking=[],
+                    reranked_ranking=[],
+                    recall_at_5=case_recall,
+                    reciprocal_rank=case_reciprocal_rank,
+                    no_answer_correct=no_answer_correct,
+                    duration_ms=None,
+                    error=f"{type(error).__name__}: {error}",
+                )
+            )
+
+    diagnosis_counts: dict[str, int] = {}
+    for result in case_results:
+        for diagnosis in result.failure_diagnostics:
+            diagnosis_counts[diagnosis.category] = diagnosis_counts.get(diagnosis.category, 0) + 1
 
     return RetrievalEvaluationSummary(
         total=len(cases),
@@ -131,6 +316,9 @@ async def evaluate_queries(service: SearchService, query_path: Path) -> Retrieva
         reranker_top1_accuracy=mean(reranker_top1_results) if reranker_top1_results else 0,
         average_duration_ms=mean(durations) if durations else 0,
         p95_duration_ms=percentile_95(durations),
+        error_count=error_count,
+        diagnosis_counts=diagnosis_counts,
+        cases=case_results,
     )
 
 

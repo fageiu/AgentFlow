@@ -34,7 +34,9 @@ class RagSettings(BaseSettings):
     lexical_mode: Literal["postgres", "bm25"] = "bm25"
     rerank_top_n: int = 10
     result_top_k: int = 5
+    # 普通融合结果和 CrossEncoder 重排结果使用不同的置信度口径。
     minimum_score: float = 0.35
+    minimum_rerank_score: float = 0.35
     minimum_vector_score_without_reranker: float = 0.55
     rrf_k: int = 60
     max_upload_bytes: int = 10 * 1024 * 1024
@@ -49,11 +51,15 @@ class RagSettings(BaseSettings):
             raise ValueError("chunk_overlap 必须大于等于 0 且小于 chunk_size")
         return value
 
-    @field_validator("minimum_score")
+    @field_validator(
+        "minimum_score",
+        "minimum_rerank_score",
+        "minimum_vector_score_without_reranker",
+    )
     @classmethod
     def validate_score(cls, value: float) -> float:
         if not 0 <= value <= 1:
-            raise ValueError("minimum_score 必须位于 0 到 1 之间")
+            raise ValueError("检索分数阈值必须位于 0 到 1 之间")
         return value
 
 

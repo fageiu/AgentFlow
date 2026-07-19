@@ -7,7 +7,7 @@ from collections.abc import Sequence
 import jieba
 from llama_index.core.schema import BaseNode
 from llama_index.vector_stores.postgres import PGVectorStore
-from sqlalchemy import delete, select, update
+from sqlalchemy import case, delete, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from .database import KnowledgeDocumentModel, KnowledgeLexicalNodeModel
@@ -27,7 +27,11 @@ class SqlDocumentRepository:
                     KnowledgeDocumentModel.policy_id == policy_id,
                     KnowledgeDocumentModel.version == version,
                 )
-                .order_by(KnowledgeDocumentModel.updated_at.desc())
+                # 同版本允许正文更新；优先最新创建的校验和，避免批量状态更新时间造成并列。
+                .order_by(
+                    KnowledgeDocumentModel.created_at.desc(),
+                    KnowledgeDocumentModel.updated_at.desc(),
+                )
                 .limit(1)
             )
             model = result.scalar_one_or_none()
@@ -96,6 +100,8 @@ class SqlDocumentRepository:
                 .order_by(
                     KnowledgeDocumentModel.effective_date.desc(),
                     KnowledgeDocumentModel.version.desc(),
+                    # 同版本正文更新时优先本次成功索引的校验和，避免旧行重新成为 current。
+                    case((KnowledgeDocumentModel.id == document_id, 1), else_=0).desc(),
                     KnowledgeDocumentModel.updated_at.desc(),
                 )
                 .limit(1)

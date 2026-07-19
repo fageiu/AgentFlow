@@ -11,6 +11,7 @@ from agentflow_rag.retrieval import (
     PolicyHybridRetriever,
     RetrievalService,
     build_lexical_websearch_query,
+    deduplicate_document_candidates,
     reciprocal_rank_fusion,
 )
 from agentflow_rag.schemas import SearchRequest
@@ -46,6 +47,23 @@ class FakeSource:
         return self.candidates[:top_k]
 
 
+class FakeReranker:
+    enabled = True
+
+    def __init__(self, ordered_scores: list[tuple[str, float]]) -> None:
+        self.ordered_scores = ordered_scores
+
+    async def rerank(
+        self, query: str, candidates: Sequence[NodeWithScore], top_n: int
+    ) -> list[NodeWithScore]:
+        del query
+        by_id = {item.node.node_id: item for item in candidates}
+        return [
+            NodeWithScore(node=by_id[node_id].node, score=score)
+            for node_id, score in self.ordered_scores[:top_n]
+        ]
+
+
 def test_rrf_deduplicates_candidates_and_combines_rank() -> None:
     shared = candidate("shared", "P-refund-001", "refund", 0.9)
     vector = [shared, candidate("vector", "P-other", "other", 0.8)]
@@ -54,6 +72,16 @@ def test_rrf_deduplicates_candidates_and_combines_rank() -> None:
     fused = reciprocal_rank_fusion(vector, lexical)
     assert [item.node.node_id for item in fused][0] == "shared"
     assert len(fused) == 3
+
+
+def test_document_candidates_are_deduplicated_before_fast_pool_truncation() -> None:
+    first = candidate("refund-1", "P-refund", "refund", 0.9)
+    duplicate = candidate("refund-2", "P-refund", "refund", 0.8)
+    other = candidate("risk", "P-risk", "approval", 0.7)
+
+    result = deduplicate_document_candidates([first, duplicate, other])
+
+    assert [item.node.node_id for item in result] == ["refund-1", "risk"]
 
 
 def test_wrong_keyword_hint_does_not_filter_semantic_result() -> None:
@@ -123,6 +151,100 @@ async def test_fast_fusion_reranker_prefers_stronger_vector_match() -> None:
     result = await FastFusionReranker().rerank("服务中断", [lexical, semantic], 2)
 
     assert [item.node.node_id for item in result] == ["semantic", "lexical"]
+
+
+@pytest.mark.asyncio
+async def test_fast_mode_keeps_semantic_top1_and_uses_fusion_coverage_after_it() -> None:
+    semantic = candidate("semantic", "P-semantic", "sla", 0.9)
+    lexical = candidate("lexical", "P-lexical", "approval", 0.8)
+    retriever = PolicyHybridRetriever(
+        FakeSource([semantic, lexical]),
+        FakeSource([lexical]),
+    )
+    service = RetrievalService(retriever, FastFusionReranker(), minimum_score=0.35)
+
+    response = await service.search(SearchRequest(query="语义主证据与覆盖", top_k=2))
+
+    assert [item.policy_id for item in response.matches] == ["P-semantic", "P-lexical"]
+    assert response.matches[0].score == pytest.approx(0.86, abs=0.01)
+    assert response.matches[1].score == pytest.approx(0.82, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_fast_mode_does_not_drop_strong_second_semantic_candidate() -> None:
+    primary = candidate("primary", "P-primary", "general", 0.95)
+    semantic_second = candidate("semantic-second", "P-expected", "approval", 0.9)
+    lexical = [
+        candidate(f"lexical-{index}", f"P-lexical-{index}", "other", 0.8 - index * 0.01)
+        for index in range(5)
+    ]
+    retriever = PolicyHybridRetriever(
+        FakeSource([primary, semantic_second, *lexical]),
+        FakeSource(lexical),
+    )
+    service = RetrievalService(retriever, FastFusionReranker(), minimum_score=0.35)
+
+    response = await service.search(SearchRequest(query="保留强语义次证据", top_k=5))
+
+    assert response.matches[0].policy_id == "P-primary"
+    assert response.matches[1].policy_id == "P-expected"
+    assert len(response.matches) == 5
+
+
+@pytest.mark.asyncio
+async def test_full_mode_records_true_stage_rankings_and_preserves_fusion_coverage() -> None:
+    fusion_primary = candidate("fusion-primary", "P-fusion", "general", 0.95)
+    reranker_primary = candidate("reranker-primary", "P-reranked", "refund", 0.9)
+    coverage = candidate("coverage", "P-coverage", "approval", 0.8)
+    retriever = PolicyHybridRetriever(
+        FakeSource([fusion_primary, reranker_primary, coverage]),
+        FakeSource([fusion_primary, coverage]),
+    )
+    service = RetrievalService(
+        retriever,
+        FakeReranker(
+            [
+                ("reranker-primary", 0.92),
+                ("fusion-primary", 0.75),
+                ("coverage", 0.7),
+            ]
+        ),
+        minimum_score=0.35,
+        minimum_rerank_score=0.8,
+    )
+
+    response = await service.search(
+        SearchRequest(query="退款审批依据", top_k=5, include_diagnostics=True)
+    )
+
+    assert [item.policy_id for item in response.matches] == [
+        "P-reranked",
+        "P-fusion",
+        "P-coverage",
+    ]
+    assert response.matches[0].score == pytest.approx(0.92)
+    assert response.matches[1].score == pytest.approx(1.0)
+    assert response.retrieval.reranker_applied is True
+    assert response.retrieval.fusion_ranking[0].node_id == "fusion-primary"
+    assert response.retrieval.reranked_ranking[0].node_id == "reranker-primary"
+    assert response.retrieval.reranked_ranking[0].rerank_score == pytest.approx(0.92)
+
+
+@pytest.mark.asyncio
+async def test_full_mode_uses_independent_reranker_rejection_threshold() -> None:
+    match = candidate("refund", "P-refund", "refund", 0.95)
+    retriever = PolicyHybridRetriever(FakeSource([match]), FakeSource([match]))
+    service = RetrievalService(
+        retriever,
+        FakeReranker([("refund", 0.6)]),
+        minimum_score=0.2,
+        minimum_rerank_score=0.7,
+    )
+
+    with pytest.raises(KnowledgeNoMatchError) as error:
+        await service.search(SearchRequest(query="退款政策"))
+
+    assert error.value.details["threshold"] == 0.7
 
 
 @pytest.mark.asyncio

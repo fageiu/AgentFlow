@@ -114,6 +114,8 @@ class IngestionService:
             document.metadata.policy_id, document.metadata.version
         )
         if existing and existing.checksum == document.checksum and existing.index_status == "indexed":
+            # 不重复 Embedding，但重新校准 current 指针，可修复异常中断或旧版本逻辑留下的状态。
+            await self.repository.complete_index(existing.id, existing.node_count)
             return IngestionResult(existing.id, "unchanged", existing.node_count)
         # 2. 开始索引
         stored = await self.repository.begin_index(document, str(path))

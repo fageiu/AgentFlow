@@ -131,12 +131,14 @@ async def initialize_runtime(
             lexical_top_k=settings.lexical_top_k,
             rrf_k=settings.rrf_k,
             fusion_top_n=candidate_top_n,
+            deduplicate_documents=not settings.enable_reranker,
         )
         app.state.retrieval = RetrievalService(
             retriever,
             reranker,
             rerank_top_n=candidate_top_n,
             minimum_score=settings.minimum_score,
+            minimum_rerank_score=settings.minimum_rerank_score,
             minimum_vector_score_without_reranker=settings.minimum_vector_score_without_reranker,
         )
         app.state.admin = admin

@@ -53,6 +53,7 @@ def test_search_returns_policy_citation(tmp_path: Path) -> None:
     assert response.json()["matches"][0]["citation"]["section"] == "受理条件"
     assert response.json()["matches"][0]["vector_score"] == 0.9
     assert response.json()["matches"][0]["lexical_score"] == 0.9
+    assert response.json()["retrieval"]["fusion_ranking"] == []
     assert response.headers["X-Request-Id"]
 
 

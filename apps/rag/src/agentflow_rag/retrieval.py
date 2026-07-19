@@ -25,6 +25,7 @@ from .schemas import (
     KnowledgeRetrievalMetrics,
     PolicyCitation,
     PolicyKnowledgeMatch,
+    RetrievalCandidateTrace,
     SearchRequest,
     SearchResponse,
 )
@@ -317,6 +318,7 @@ class PolicyHybridRetriever(BaseRetriever):
         lexical_top_k: int = 20,
         rrf_k: int = 60,
         fusion_top_n: int = 10,
+        deduplicate_documents: bool = False,
     ) -> None:
         super().__init__()
         self.vector_source = vector_source
@@ -325,6 +327,7 @@ class PolicyHybridRetriever(BaseRetriever):
         self.lexical_top_k = lexical_top_k
         self.rrf_k = rrf_k
         self.fusion_top_n = fusion_top_n
+        self.deduplicate_documents = deduplicate_documents
         self.keyword_hint: str | None = None
         self.include_archived = False
         self.last_snapshot = HybridRetrievalSnapshot([], 0, 0)
@@ -341,6 +344,9 @@ class PolicyHybridRetriever(BaseRetriever):
             query, self.lexical_top_k, include_archived=self.include_archived
         )
         fused = reciprocal_rank_fusion(vector, lexical, self.rrf_k, self.keyword_hint)
+        if self.deduplicate_documents:
+            # Fast 模式在截断候选池前按文档去重，避免同一政策的多个 Node 挤掉其他政策。
+            fused = deduplicate_document_candidates(fused)
         result = fused[: self.fusion_top_n]
         self.last_snapshot = HybridRetrievalSnapshot(result, len(vector), len(lexical))
         return result
@@ -373,6 +379,21 @@ def reciprocal_rank_fusion(
         candidate.node.metadata["fusion_score"] = normalized
         result.append(NodeWithScore(node=candidate.node, score=normalized))
     return sorted(result, key=lambda item: item.score or 0, reverse=True)
+
+
+def deduplicate_document_candidates(
+    candidates: Sequence[NodeWithScore],
+) -> list[NodeWithScore]:
+    """保留每个文档融合排名最高的 Node，并维持文档首次出现的顺序。"""
+    result: list[NodeWithScore] = []
+    seen_documents: set[str] = set()
+    for candidate in candidates:
+        document_id = str(candidate.node.metadata.get("document_id", candidate.node.node_id))
+        if document_id in seen_documents:
+            continue
+        seen_documents.add(document_id)
+        result.append(candidate)
+    return result
 
 
 def build_lexical_websearch_query(query: str) -> str:
@@ -408,12 +429,14 @@ class RetrievalService:
         *,
         rerank_top_n: int = 10,
         minimum_score: float = 0.35,
+        minimum_rerank_score: float = 0.35,
         minimum_vector_score_without_reranker: float = 0.55,
     ) -> None:
         self.retriever = retriever
         self.reranker = reranker
         self.rerank_top_n = rerank_top_n
         self.minimum_score = minimum_score
+        self.minimum_rerank_score = minimum_rerank_score
         self.minimum_vector_score_without_reranker = minimum_vector_score_without_reranker
 
     async def search(self, request: SearchRequest) -> SearchResponse:
@@ -433,19 +456,25 @@ class RetrievalService:
                     threshold=self.minimum_vector_score_without_reranker,
                 )
         reranked = await self.reranker.rerank(request.query, fused, self.rerank_top_n)
-        matches = [self._to_match(candidate, self.reranker.enabled) for candidate in reranked]
-        # 同一文档只保留最高分 Node，避免重复分块挤占 Top-K 的政策多样性。
-        seen_documents: set[str] = set()
-        unique_matches: list[PolicyKnowledgeMatch] = []
-        for match in matches:
-            if match.citation.document_id in seen_documents:
-                continue
-            seen_documents.add(match.citation.document_id)
-            unique_matches.append(match)
-        matches = unique_matches
-        matches = [match for match in matches if match.score >= self.minimum_score][: request.top_k]
+        if self.reranker.enabled:
+            matches = self._select_reranked_with_fusion_coverage(
+                fused,
+                reranked,
+                request.top_k,
+            )
+            rejection_threshold = self.minimum_rerank_score
+        else:
+            matches = self._select_fast_with_fusion_coverage(
+                fused,
+                reranked,
+                request.top_k,
+            )
+            rejection_threshold = self.minimum_score
         if not matches:
-            raise KnowledgeNoMatchError(query_length=len(request.query), threshold=self.minimum_score)
+            raise KnowledgeNoMatchError(
+                query_length=len(request.query),
+                threshold=rejection_threshold,
+            )
         snapshot = self.retriever.last_snapshot
         return SearchResponse(
             matches=matches,
@@ -454,14 +483,33 @@ class RetrievalService:
                 lexical_candidates=snapshot.lexical_count,
                 reranked_candidates=len(reranked),
                 duration_ms=round((time.perf_counter() - started_at) * 1000),
+                reranker_applied=self.reranker.enabled,
+                fusion_ranking=(
+                    self._to_stage_ranking(fused, reranker_applied=False)
+                    if request.include_diagnostics
+                    else []
+                ),
+                reranked_ranking=(
+                    self._to_stage_ranking(
+                        reranked,
+                        reranker_applied=self.reranker.enabled,
+                    )
+                    if request.include_diagnostics
+                    else []
+                ),
             ),
         )
 
     @staticmethod
-    def _to_match(candidate: NodeWithScore, reranker_applied: bool) -> PolicyKnowledgeMatch:
+    def _to_match(
+        candidate: NodeWithScore,
+        *,
+        result_score: float | None = None,
+        rerank_score: float | None = None,
+    ) -> PolicyKnowledgeMatch:
         """将 NodeWithScore 映射为 PolicyKnowledgeMatch"""
         metadata = candidate.node.metadata
-        score = normalize_rerank_score(candidate.score)
+        score = normalize_rerank_score(candidate.score) if result_score is None else result_score
         return PolicyKnowledgeMatch(
             policy_id=str(metadata["policy_id"]),
             keyword=str(metadata["keyword"]),
@@ -471,7 +519,7 @@ class RetrievalService:
             vector_score=_optional_score(metadata.get("vector_score")),
             lexical_score=_optional_score(metadata.get("lexical_score")),
             fusion_score=float(metadata.get("fusion_score", 0)),
-            rerank_score=score if reranker_applied else None,
+            rerank_score=rerank_score,
             citation=PolicyCitation(
                 document_id=str(metadata["document_id"]),
                 node_id=candidate.node.node_id,
@@ -481,6 +529,123 @@ class RetrievalService:
                 page=metadata.get("page"),
             ),
         )
+
+    def _select_reranked_with_fusion_coverage(
+        self,
+        fused: Sequence[NodeWithScore],
+        reranked: Sequence[NodeWithScore],
+        top_k: int,
+    ) -> list[PolicyKnowledgeMatch]:
+        """Reranker 决定主证据，其余位置保留高置信融合候选的政策覆盖。"""
+        if not reranked:
+            return []
+        rerank_scores = {
+            item.node.node_id: normalize_rerank_score(item.score) for item in reranked
+        }
+        primary = reranked[0]
+        primary_score = rerank_scores[primary.node.node_id]
+        if primary_score < self.minimum_rerank_score:
+            return []
+
+        candidates = [
+            self._to_match(
+                primary,
+                result_score=primary_score,
+                rerank_score=primary_score,
+            )
+        ]
+        for candidate in fused:
+            if candidate.node.node_id == primary.node.node_id:
+                continue
+            fusion_score = _optional_score(candidate.node.metadata.get("fusion_score")) or 0
+            candidates.append(
+                self._to_match(
+                    candidate,
+                    result_score=fusion_score,
+                    rerank_score=rerank_scores.get(candidate.node.node_id),
+                )
+            )
+        return self._deduplicate_matches(
+            candidates,
+            minimum_score=self.minimum_score,
+            top_k=top_k,
+            preserve_first=True,
+        )
+
+    def _select_fast_with_fusion_coverage(
+        self,
+        fused: Sequence[NodeWithScore],
+        ranked: Sequence[NodeWithScore],
+        top_k: int,
+    ) -> list[PolicyKnowledgeMatch]:
+        """FastFusion 保留前两条强语义证据，其余位置按融合顺序保护多政策覆盖。"""
+        if not ranked:
+            return []
+        ranked_primary = list(ranked[: min(2, top_k)])
+        candidates = [
+            self._to_match(item, result_score=normalize_rerank_score(item.score))
+            for item in ranked_primary
+        ]
+        primary_node_ids = {item.node.node_id for item in ranked_primary}
+        for candidate in fused:
+            if candidate.node.node_id in primary_node_ids:
+                continue
+            fusion_score = _optional_score(candidate.node.metadata.get("fusion_score")) or 0
+            candidates.append(self._to_match(candidate, result_score=fusion_score))
+        return self._deduplicate_matches(
+            candidates,
+            minimum_score=self.minimum_score,
+            top_k=top_k,
+            preserve_first=True,
+        )
+
+    @staticmethod
+    def _deduplicate_matches(
+        matches: Sequence[PolicyKnowledgeMatch],
+        *,
+        minimum_score: float,
+        top_k: int,
+        preserve_first: bool = False,
+    ) -> list[PolicyKnowledgeMatch]:
+        """按文档去重，避免同一政策的多个分块挤占证据位置。"""
+        selected: list[PolicyKnowledgeMatch] = []
+        seen_documents: set[str] = set()
+        for index, match in enumerate(matches):
+            if match.citation.document_id in seen_documents:
+                continue
+            if match.score < minimum_score and not (preserve_first and index == 0):
+                continue
+            seen_documents.add(match.citation.document_id)
+            selected.append(match)
+            if len(selected) >= top_k:
+                break
+        return selected
+
+    @staticmethod
+    def _to_stage_ranking(
+        candidates: Sequence[NodeWithScore],
+        *,
+        reranker_applied: bool,
+    ) -> list[RetrievalCandidateTrace]:
+        """在响应中冻结阶段排名，避免评测从最终结果反推原始顺序。"""
+        ranking: list[RetrievalCandidateTrace] = []
+        for rank, candidate in enumerate(candidates, start=1):
+            metadata = candidate.node.metadata
+            ranking.append(
+                RetrievalCandidateTrace(
+                    rank=rank,
+                    policy_id=str(metadata["policy_id"]),
+                    document_id=str(metadata["document_id"]),
+                    node_id=candidate.node.node_id,
+                    vector_score=_optional_score(metadata.get("vector_score")),
+                    lexical_score=_optional_score(metadata.get("lexical_score")),
+                    fusion_score=_optional_score(metadata.get("fusion_score")),
+                    rerank_score=(
+                        normalize_rerank_score(candidate.score) if reranker_applied else None
+                    ),
+                )
+            )
+        return ranking
 
 
 def _optional_score(value: object) -> float | None:

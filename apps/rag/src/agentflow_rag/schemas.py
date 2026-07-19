@@ -67,11 +67,27 @@ class PolicyKnowledgeMatch(BaseModel):
     citation: PolicyCitation
 
 
+class RetrievalCandidateTrace(BaseModel):
+    """记录候选在融合或重排阶段的真实位置与分数，供离线评测比较。"""
+
+    rank: int = Field(ge=1)
+    policy_id: str
+    document_id: str
+    node_id: str
+    vector_score: float | None = None
+    lexical_score: float | None = None
+    fusion_score: float | None = None
+    rerank_score: float | None = None
+
+
 class KnowledgeRetrievalMetrics(BaseModel):
     vector_candidates: int
     lexical_candidates: int
     reranked_candidates: int
     duration_ms: int
+    reranker_applied: bool = False
+    fusion_ranking: list[RetrievalCandidateTrace] = Field(default_factory=list)
+    reranked_ranking: list[RetrievalCandidateTrace] = Field(default_factory=list)
 
 
 class SearchRequest(BaseModel):
@@ -79,6 +95,7 @@ class SearchRequest(BaseModel):
     keyword_hint: str | None = Field(default=None, max_length=100)
     top_k: int = Field(default=5, ge=1, le=10)
     include_archived: bool = False
+    include_diagnostics: bool = False
 
 
 class SearchResponse(BaseModel):

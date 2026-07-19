@@ -26,6 +26,9 @@ services:
       RAG_LOAD_MODELS: "true"
       # 本机 CPU 在线检索使用 RRF；完整 BGE Reranker 通过真实评测配置启用。
       RAG_ENABLE_RERANKER: ${RAG_ENABLE_RERANKER:-false}
+      # CrossEncoder 与普通融合分数口径不同，分别维护拒答阈值。
+      RAG_MINIMUM_SCORE: ${RAG_MINIMUM_SCORE:-0.35}
+      RAG_MINIMUM_RERANK_SCORE: ${RAG_MINIMUM_RERANK_SCORE:-0.35}
       # BM25 为默认稀疏召回；postgres 可用于评测基线和快速回滚。
       RAG_LEXICAL_MODE: ${RAG_LEXICAL_MODE:-bm25}
       RAG_AUTO_INGEST_BUNDLED: "true"

@@ -108,6 +108,49 @@ async def test_latest_active_version_is_current_independent_of_import_order() ->
 
 
 @pytest.mark.asyncio
+async def test_same_version_content_update_prefers_newly_completed_checksum() -> None:
+    assert DATABASE_URL
+    engine = create_engine(DATABASE_URL)
+    sessions = create_session_factory(engine)
+    repository = SqlDocumentRepository(sessions)
+    policy_id = f"POL-SAME-VERSION-{uuid4().hex[:10]}"
+    try:
+        first = await repository.begin_index(
+            make_document(policy_id, "1.0", date(2026, 1, 1), "active"),
+            "first.md",
+        )
+        await repository.complete_index(first.id, 1)
+        updated = await repository.begin_index(
+            make_document(policy_id, "1.0", date(2026, 1, 1), "active"),
+            "updated.md",
+        )
+        await repository.complete_index(updated.id, 2)
+
+        async with sessions() as session:
+            rows = (
+                await session.scalars(
+                    select(KnowledgeDocumentModel).where(
+                        KnowledgeDocumentModel.policy_id == policy_id
+                    )
+                )
+            ).all()
+        found = await repository.find_by_policy_version(policy_id, "1.0")
+
+        assert updated.id != first.id
+        assert [row.id for row in rows if row.is_current] == [updated.id]
+        assert found is not None
+        assert found.id == updated.id
+    finally:
+        async with sessions.begin() as session:
+            await session.execute(
+                delete(KnowledgeDocumentModel).where(
+                    KnowledgeDocumentModel.policy_id == policy_id
+                )
+            )
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_pgvector_and_lexical_nodes_are_written_and_deleted_together() -> None:
     assert DATABASE_URL
     engine = create_engine(DATABASE_URL)
