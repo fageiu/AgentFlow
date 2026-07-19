@@ -14,7 +14,7 @@ AgentFlow 是一个面向企业流程自动化的 AI Agent Runtime 与 Evaluatio
 - **结构化业务 Outcome**：服务端根据真实工具轨迹和审批决议派生 `decision`、实际写入动作与证据引用，自然语言措辞变化不再影响核心业务判定。
 - **业务语义约束**：单工单任务会预读取真实上下文，规则检索依据工单标题和描述归一到退款、审批、发票、SLA、升级、取消、重复退款或安全规则，降低模型误选工具和关键词的概率。
 - **模型层解耦**：统一封装 OpenAI-compatible Provider，支持兼容模型切换和 Mock fallback，便于本地演示与稳定回归。
-- **企业政策 RAG**：独立 FastAPI + LlamaIndex 服务使用 BGE-M3、BGE Reranker、pgvector 与中文全文索引，`searchPolicy` 返回 Top-K、分阶段得分和可验证 Citation。
+- **企业政策 RAG**：独立 FastAPI + LlamaIndex 服务使用 BGE-M3、BM25、BGE Reranker 与 pgvector，`searchPolicy` 返回 Top-K、分阶段得分和可验证 Citation。
 
 完整设计见 [Agent 执行架构](docs/architecture.md)。
 
@@ -280,9 +280,14 @@ cd apps/rag
 uv run agentflow-rag-eval --profile fast --enforce-targets --output ../../.agentflow-artifacts/rag-evaluation.json
 ```
 
+默认使用 `RAG_LEXICAL_MODE=bm25`，通过 jieba 预分词和 LlamaIndex `BM25Retriever`
+完成稀疏召回；设置为 `postgres` 可切回原生全文检索基线，用于 A/B 评测和故障回滚。
+
 `fast` 对应 Docker Compose 的 CPU 在线模式（Recall@5 ≥90%、MRR ≥0.78、拒答率 ≥90%、P95 ≤2 秒）。
 GPU 或离线完整 BGE Reranker 验收使用 `--profile full`，继续执行原计划的 95% / 0.85 质量目标，
 不会因本机 CPU 限制而降低完整模式标准。
+CPU 上如需采集完整 Reranker 质量数据，可追加 `--request-timeout 180`；该参数只延长
+评测客户端等待时间，不会放宽 P95 或其他门禁目标。
 
 也可以只启动一侧：
 

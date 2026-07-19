@@ -1854,7 +1854,7 @@ button:disabled {
   margin-top: 6px;
 }
 
-.plan-tool-detail summary {
+.plan-tool-detail > summary {
   display: flex;
   gap: 8px;
   align-items: center;
@@ -1866,11 +1866,11 @@ button:disabled {
   list-style: none;
 }
 
-.plan-tool-detail summary::-webkit-details-marker {
+.plan-tool-detail > summary::-webkit-details-marker {
   display: none;
 }
 
-.plan-tool-detail summary::before {
+.plan-tool-detail > summary::before {
   content: "";
   width: 6px;
   height: 6px;
@@ -1883,11 +1883,11 @@ button:disabled {
   transition: transform 0.15s ease;
 }
 
-.plan-tool-detail[open] summary::before {
+.plan-tool-detail[open] > summary::before {
   transform: rotate(45deg);
 }
 
-.plan-tool-detail summary small {
+.plan-tool-detail > summary small {
   color: #94a3b8;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 9px;

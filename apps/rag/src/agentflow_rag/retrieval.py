@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 import time
 from collections.abc import Sequence
@@ -13,6 +14,7 @@ from llama_index.core import VectorStoreIndex
 from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.retrievers import BaseRetriever
 from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
+from llama_index.retrievers.bm25 import BM25Retriever
 from llama_index.vector_stores.postgres import PGVectorStore
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -134,6 +136,109 @@ class PostgresLexicalSource:
             )
             for model, score in rows
         ]
+
+
+class LlamaIndexBM25Source:
+    """基于 jieba 预分词和 LlamaIndex BM25Retriever 的内存稀疏索引。"""
+
+    def __init__(self, sessions: async_sessionmaker | None, *, similarity_top_k: int = 20) -> None:
+        self.sessions = sessions
+        self.similarity_top_k = similarity_top_k
+        self._active_retriever: BM25Retriever | None = None
+        self._all_retriever: BM25Retriever | None = None
+        self._refresh_lock = asyncio.Lock()
+
+    async def refresh(self) -> None:
+        """从数据库构建新快照，全部成功后一次性替换，避免查询读到半成品。"""
+        if self.sessions is None:
+            raise RuntimeError("BM25 数据库会话未配置")
+        async with self._refresh_lock:
+            async with self.sessions() as session:
+                rows = (
+                    await session.execute(
+                        select(KnowledgeLexicalNodeModel, KnowledgeDocumentModel)
+                        .join(
+                            KnowledgeDocumentModel,
+                            KnowledgeDocumentModel.id == KnowledgeLexicalNodeModel.document_id,
+                        )
+                        .where(KnowledgeDocumentModel.index_status == "indexed")
+                    )
+                ).all()
+            all_nodes = [self._to_text_node(node) for node, _document in rows]
+            active_nodes = [
+                self._to_text_node(node)
+                for node, document in rows
+                if document.status == "active" and document.is_current
+            ]
+            await self.replace_nodes(active_nodes, all_nodes)
+
+    async def replace_nodes(
+        self, active_nodes: Sequence[TextNode], all_nodes: Sequence[TextNode]
+    ) -> None:
+        """构建并原子替换有效版本与历史版本两份 BM25 快照。"""
+        active, all_versions = await asyncio.gather(
+            asyncio.to_thread(self._build_retriever, active_nodes),
+            asyncio.to_thread(self._build_retriever, all_nodes),
+        )
+        self._active_retriever, self._all_retriever = active, all_versions
+
+    async def retrieve(
+        self, query: str, top_k: int, *, include_archived: bool = False
+    ) -> list[NodeWithScore]:
+        retriever = self._all_retriever if include_archived else self._active_retriever
+        if retriever is None:
+            return []
+        # BM25Retriever 是同步 CPU 计算，放入工作线程避免阻塞 FastAPI 事件循环。
+        results = await asyncio.to_thread(self._retrieve, retriever, query)
+        return results[:top_k]
+
+    def _build_retriever(self, nodes: Sequence[TextNode]) -> BM25Retriever | None:
+        if not nodes:
+            return None
+        indexed_nodes: list[TextNode] = []
+        for node in nodes:
+            metadata = dict(node.metadata)
+            metadata["bm25_original_content"] = node.text
+            title = str(metadata.get("title", ""))
+            searchable_text = " ".join(tokenize_lexical(f"{title} {node.text}")) or node.text
+            indexed_nodes.append(
+                TextNode(
+                    id_=node.node_id,
+                    text=searchable_text,
+                    metadata=metadata,
+                    # BM25 只索引 jieba 处理后的正文，Citation 元数据仅随结果透传。
+                    excluded_embed_metadata_keys=[*metadata.keys()],
+                )
+            )
+        return BM25Retriever.from_defaults(
+            nodes=indexed_nodes,
+            similarity_top_k=min(self.similarity_top_k, len(indexed_nodes)),
+            language="en",
+            skip_stemming=True,
+            token_pattern=r"(?u)\b\w+\b",
+        )
+
+    @staticmethod
+    def _retrieve(retriever: BM25Retriever, query: str) -> list[NodeWithScore]:
+        tokenized_query = " ".join(tokenize_lexical(query)) or query
+        results = retriever.retrieve(tokenized_query)
+        restored: list[NodeWithScore] = []
+        for result in results:
+            if not result.score or result.score <= 0:
+                continue
+            metadata = dict(result.node.metadata)
+            content = str(metadata.pop("bm25_original_content", result.node.text))
+            restored.append(
+                NodeWithScore(
+                    node=TextNode(id_=result.node.node_id, text=content, metadata=metadata),
+                    score=result.score,
+                )
+            )
+        return restored
+
+    @staticmethod
+    def _to_text_node(model: KnowledgeLexicalNodeModel) -> TextNode:
+        return TextNode(id_=model.node_id, text=model.content, metadata=model.node_metadata)
 
 
 class LlamaIndexSentenceReranker:
@@ -272,14 +377,19 @@ def reciprocal_rank_fusion(
 
 def build_lexical_websearch_query(query: str) -> str:
     """将 jieba 结果转换为 PostgreSQL websearch OR 查询，并保持词序与去重。"""
-    tokens = list(
+    tokens = tokenize_lexical(query)
+    return " OR ".join(tokens) or query
+
+
+def tokenize_lexical(text: str) -> list[str]:
+    """统一 BM25 与 PostgreSQL 基线的中文分词和停用词规则。"""
+    return list(
         dict.fromkeys(
             token
-            for raw_token in jieba.cut_for_search(query)
+            for raw_token in jieba.cut_for_search(text)
             if len(token := raw_token.strip()) >= 2 and token not in LEXICAL_STOP_WORDS
         )
     )
-    return " OR ".join(tokens) or query
 
 
 def normalize_rerank_score(score: float | None) -> float:

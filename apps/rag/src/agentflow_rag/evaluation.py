@@ -52,8 +52,11 @@ def passes_targets(summary: RetrievalEvaluationSummary, profile: str = "full") -
 
 
 class HttpSearchService:
-    def __init__(self, base_url: str) -> None:
-        self.client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=10)
+    def __init__(self, base_url: str, *, timeout_seconds: float = 10) -> None:
+        self.client = httpx.AsyncClient(
+            base_url=base_url.rstrip("/"),
+            timeout=timeout_seconds,
+        )
 
     async def search(self, request: SearchRequest) -> SearchResponse:
         response = await self.client.post("/v1/search", json=request.model_dump())
@@ -140,12 +143,18 @@ def run_cli() -> None:
         default=os.getenv("RAG_EVAL_BASE_URL", "http://127.0.0.1:8000"),
     )
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--request-timeout",
+        type=float,
+        default=float(os.getenv("RAG_EVAL_REQUEST_TIMEOUT_SECONDS", "10")),
+        help="单条检索超时秒数；CPU 完整 Reranker 评测可提高该值",
+    )
     parser.add_argument("--enforce-targets", action="store_true")
     parser.add_argument("--profile", choices=("full", "fast"), default="full")
     args = parser.parse_args()
 
     async def evaluate() -> RetrievalEvaluationSummary:
-        service = HttpSearchService(args.base_url)
+        service = HttpSearchService(args.base_url, timeout_seconds=args.request_timeout)
         try:
             return await evaluate_queries(service, args.queries)
         finally:

@@ -18,6 +18,7 @@ from .health import ReadinessService
 from .ingestion import IngestionService
 from .retrieval import (
     FastFusionReranker,
+    LlamaIndexBM25Source,
     LlamaIndexSentenceReranker,
     LlamaIndexVectorSource,
     PolicyHybridRetriever,
@@ -97,6 +98,11 @@ async def initialize_runtime(
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
         )
+        lexical_source = (
+            LlamaIndexBM25Source(sessions, similarity_top_k=settings.lexical_top_k)
+            if settings.lexical_mode == "bm25"
+            else PostgresLexicalSource(sessions)
+        )
         admin = KnowledgeAdminService(
             sessions,
             ingestion,
@@ -104,6 +110,7 @@ async def initialize_runtime(
             settings.upload_dir,
             settings.bundled_policy_dir,
             max_upload_bytes=settings.max_upload_bytes,
+            lexical_index=lexical_source if isinstance(lexical_source, LlamaIndexBM25Source) else None,
         )
         if settings.auto_ingest_bundled:
             results = await admin.reindex_bundled()
@@ -114,10 +121,12 @@ async def initialize_runtime(
                     "node_count": sum(item.node_count for item in results),
                 },
             )
+        elif isinstance(lexical_source, LlamaIndexBM25Source):
+            await lexical_source.refresh()
 
         retriever = PolicyHybridRetriever(
             LlamaIndexVectorSource(vector_store, embed_model, sessions),
-            PostgresLexicalSource(sessions),
+            lexical_source,
             vector_top_k=settings.vector_top_k,
             lexical_top_k=settings.lexical_top_k,
             rrf_k=settings.rrf_k,
@@ -133,7 +142,10 @@ async def initialize_runtime(
         app.state.admin = admin
         indexed_count = await _indexed_document_count(sessions)
         readiness.set_index_ready(indexed_count > 0, None if indexed_count else "empty_index")
-        logger.info("knowledge_runtime_ready", extra={"document_count": indexed_count})
+        logger.info(
+            "knowledge_runtime_ready",
+            extra={"document_count": indexed_count, "lexical_mode": settings.lexical_mode},
+        )
     except Exception as error:
         readiness.set_index_ready(False, type(error).__name__)
         logger.exception("knowledge_index_initialization_failed")

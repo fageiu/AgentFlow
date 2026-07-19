@@ -25,7 +25,9 @@ services:
       RAG_UPLOAD_DIR: /data/uploads
       RAG_LOAD_MODELS: "true"
       # 本机 CPU 在线检索使用 RRF；完整 BGE Reranker 通过真实评测配置启用。
-      RAG_ENABLE_RERANKER: "false"
+      RAG_ENABLE_RERANKER: ${RAG_ENABLE_RERANKER:-false}
+      # BM25 为默认稀疏召回；postgres 可用于评测基线和快速回滚。
+      RAG_LEXICAL_MODE: ${RAG_LEXICAL_MODE:-bm25}
       RAG_AUTO_INGEST_BUNDLED: "true"
       HF_HOME: /models
       SENTENCE_TRANSFORMERS_HOME: /models

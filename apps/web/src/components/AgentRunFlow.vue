@@ -373,8 +373,8 @@ const streamingActivity = computed(() => {
                 v-if="getToolCallDetail(item).toolName === 'searchPolicy'"
                 :output="getToolCallDetail(item).output"
               />
-              <div class="plan-tool-payload">
-                <strong>{{ getToolCallDetail(item).toolName === 'searchPolicy' ? '原始输出' : '输出' }}</strong>
+              <div v-if="getToolCallDetail(item).toolName !== 'searchPolicy'" class="plan-tool-payload">
+                <strong>输出</strong>
                 <pre>{{ formatToolPayload(getToolCallDetail(item).output) }}</pre>
               </div>
             </details>

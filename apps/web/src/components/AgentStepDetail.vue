@@ -122,8 +122,8 @@ const approvalPreview = computed(() => {
           v-if="step.toolName === 'searchPolicy'"
           :output="toolDetail.output"
         />
-        <div class="plan-tool-payload">
-          <strong>{{ step.toolName === 'searchPolicy' ? '原始输出' : '输出' }}</strong>
+        <div v-if="step.toolName !== 'searchPolicy'" class="plan-tool-payload">
+          <strong>输出</strong>
           <pre>{{ formatToolPayload(toolDetail.output) }}</pre>
         </div>
       </details>

@@ -290,12 +290,37 @@ function buildMockPlan(task: string) {
   };
 }
 
-/** Mock 决策阶段同样只根据已传入的工单与规则证据决定是否进入退款流程。 */
+function parsePromptJson(value: string, label: string) {
+  const raw = value.match(new RegExp(`${label}：([^\\n]+)`))?.[1];
+  if (!raw) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Mock 决策仅用工单事实分类场景，并用 Top-1 政策确认规则，避免 Top-K 示例词污染。 */
 function buildMockActionPlan(evidence: string) {
-  const hasMatchedRefundRule = /VIP 客户退款规则|"matchedKeyword"\s*:\s*"refund"|"keyword"\s*:\s*"refund"/i.test(evidence);
-  const hasNonRefundScenario = /发票|invoice|升级|合同升级|sla|服务不可用|取消|cancel/i.test(evidence);
-  // 工单证据明确属于发票、升级等非退款场景时，错误命中的退款规则不能覆盖业务事实。
-  const shouldRefund = !hasNonRefundScenario && (hasMatchedRefundRule || /退款|refund/i.test(evidence));
+  const task = evidence.match(/用户任务：([^\n]+)/)?.[1] ?? "";
+  const ticket = parsePromptJson(evidence, "工单上下文");
+  const facts = parsePromptJson(evidence, "已完成核查证据");
+  const policy = facts?.policy && typeof facts.policy === "object" && !Array.isArray(facts.policy)
+    ? facts.policy as Record<string, unknown>
+    : undefined;
+  const scenarioEvidence = `${task}\n${JSON.stringify(ticket ?? {})}`;
+  const policyKeyword = String(policy?.matchedKeyword ?? policy?.keyword ?? "").toLowerCase();
+  const hasMatchedRefundRule = policyKeyword === "refund";
+  const hasNonRefundScenario = /发票|invoice|升级|合同升级|sla|服务不可用|取消|cancel/i.test(scenarioEvidence);
+  const isDuplicateRefundScenario = /重复.{0,6}退款|退款.{0,6}重复|再次提交退款/i.test(scenarioEvidence);
+  // 专项非退款场景和重复退款核查不能被通用退款政策覆盖。
+  const shouldRefund = hasMatchedRefundRule
+    && /退款|refund/i.test(scenarioEvidence)
+    && !hasNonRefundScenario
+    && !isDuplicateRefundScenario;
 
   if (!shouldRefund) {
     return {

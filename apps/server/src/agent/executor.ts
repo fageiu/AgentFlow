@@ -522,7 +522,7 @@ async function buildActionPlanStep(run: AgentRun, ticketContext: unknown, index:
       ...buildActionPlanPrompt({
         task: run.task,
         ticketContext,
-        evidence: summarizeStepsForFinalPrompt(run.steps),
+        evidence: buildActionDecisionEvidence(run.steps),
         // 沙箱使用固定业务时钟，避免演示数据随真实日期推移后改变退款资格判断。
         businessDate: process.env.AGENTFLOW_BUSINESS_DATE ?? "2026-07-01",
       }),
@@ -890,6 +890,52 @@ function summarizeStepsForFinalPrompt(steps: AgentStep[]) {
       toolName: step.toolName,
       detail: step.detail.length > 1800 ? `${step.detail.slice(0, 1800)}...` : step.detail,
     }));
+}
+
+/**
+ * Action Planner 只接收业务事实和 Top-1 政策。
+ * Top 2-5 仍保留在 Trace 中供展示和审计，但不得用其中的示例词改变写入决策。
+ */
+export function buildActionDecisionEvidence(steps: AgentStep[]) {
+  const readOutput = (toolName: string) => {
+    const step = [...steps].reverse().find(
+      (item) => item.toolName === toolName && item.status === "completed"
+        && item.title !== "等待人工审批：高风险工具调用",
+    );
+
+    if (!step) {
+      return undefined;
+    }
+
+    try {
+      const detail = JSON.parse(step.detail) as { output?: unknown };
+      return detail.output && typeof detail.output === "object" && !Array.isArray(detail.output)
+        ? detail.output as Record<string, unknown>
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const policy = readOutput("searchPolicy");
+  const topPolicy = policy
+    ? Object.fromEntries([
+        "id",
+        "keyword",
+        "title",
+        "content",
+        "matchedKeyword",
+        "requestedKeyword",
+        "score",
+        "citation",
+      ].flatMap((key) => policy[key] === undefined ? [] : [[key, policy[key]]]))
+    : undefined;
+
+  return {
+    customer: readOutput("getCustomer"),
+    order: readOutput("getOrder"),
+    policy: topPolicy,
+  };
 }
 
 const requiredConclusionLabels = ["工单需求", "处理结果", "处理依据", "下一步"] as const;

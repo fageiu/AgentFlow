@@ -32,6 +32,10 @@ class AdminOperations(Protocol):
     async def reindex_bundled(self) -> list[IngestionResult]: ...
 
 
+class LexicalIndexRefresher(Protocol):
+    async def refresh(self) -> None: ...
+
+
 class KnowledgeAdminService:
     def __init__(
         self,
@@ -42,6 +46,7 @@ class KnowledgeAdminService:
         bundled_policy_dir: Path,
         *,
         max_upload_bytes: int,
+        lexical_index: LexicalIndexRefresher | None = None,
     ) -> None:
         self.sessions = sessions
         self.ingestion = ingestion
@@ -49,6 +54,7 @@ class KnowledgeAdminService:
         self.upload_dir = upload_dir
         self.bundled_policy_dir = bundled_policy_dir
         self.max_upload_bytes = max_upload_bytes
+        self.lexical_index = lexical_index
 
     async def list_documents(self) -> list[DocumentSummary]:
         async with self.sessions() as session:
@@ -73,10 +79,13 @@ class KnowledgeAdminService:
         safe_path = self.upload_dir / f"{uuid4().hex}{suffix}"
         safe_path.write_bytes(content)
         try:
-            return await self.ingestion.ingest_file(safe_path, metadata)
+            result = await self.ingestion.ingest_file(safe_path, metadata)
         except Exception:
             safe_path.unlink(missing_ok=True)
             raise
+        # 文档已成功入库后即使稀疏索引刷新失败也保留源文件，便于管理员安全重试。
+        await self._refresh_lexical_index()
+        return result
 
     async def reindex(self, document_id: str) -> IngestionResult:
         model = await self._get_model(document_id)
@@ -85,7 +94,9 @@ class KnowledgeAdminService:
             if Path(model.source_path).suffix.lower() == ".pdf"
             else None
         )
-        return await self.ingestion.ingest_file(Path(model.source_path), metadata)
+        result = await self.ingestion.ingest_file(Path(model.source_path), metadata)
+        await self._refresh_lexical_index()
+        return result
 
     async def delete(self, document_id: str) -> bool:
         model = await self._get_model(document_id, required=False)
@@ -100,13 +111,20 @@ class KnowledgeAdminService:
         if self._is_inside(source_path, self.upload_dir):
             # 文件系统删除可能阻塞事件循环，交给工作线程执行。
             await asyncio.to_thread(source_path.unlink, missing_ok=True)
+        await self._refresh_lexical_index()
         return True
 
     async def reindex_bundled(self) -> list[IngestionResult]:
         results: list[IngestionResult] = []
         for path in sorted(self.bundled_policy_dir.rglob("*.md")):
             results.append(await self.ingestion.ingest_file(path))
+        await self._refresh_lexical_index()
         return results
+
+    async def _refresh_lexical_index(self) -> None:
+        """文档生命周期成功落库后刷新可替换的 BM25 快照。"""
+        if self.lexical_index is not None:
+            await self.lexical_index.refresh()
 
     async def _get_model(
         self, document_id: str, *, required: bool = True

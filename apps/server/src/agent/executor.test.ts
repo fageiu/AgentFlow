@@ -165,6 +165,71 @@ test("规则检索应使用真实工单语义纠正模型的错误关键词", as
   assert.equal(duplicateRefundCall.arguments.keyword, "duplicate-refund");
 });
 
+test("Action Planner 不得被 Top-K 次要政策或退款政策中的例外词误导", async () => {
+  process.env.LLM_MOCK = "true";
+
+  const { buildActionDecisionEvidence } = await import("./executor.js");
+  const { buildActionPlanPrompt } = await import("../llm/prompts.js");
+  const { generateText } = await import("../llm/provider.js");
+  const steps: AgentStep[] = [
+    {
+      id: "customer",
+      type: "tool_call",
+      title: "查询客户",
+      status: "completed",
+      toolName: "getCustomer",
+      detail: JSON.stringify({ output: { id: "C-9001", level: "vip" } }),
+    },
+    {
+      id: "order",
+      type: "tool_call",
+      title: "查询订单",
+      status: "completed",
+      toolName: "getOrder",
+      detail: JSON.stringify({ output: { id: "O-7001", status: "completed", refundStatus: "none", amount: 6800 } }),
+    },
+    {
+      id: "policy",
+      type: "tool_call",
+      title: "检索规则",
+      status: "completed",
+      toolName: "searchPolicy",
+      detail: JSON.stringify({
+        output: {
+          id: "P-refund-001",
+          keyword: "refund",
+          matchedKeyword: "refund",
+          title: "VIP 客户退款管理办法",
+          content: "符合条件可申请退款；已取消订单应适用取消规则。",
+          matches: [
+            { policyId: "P-invoice-001", keyword: "发票", content: "发票更正示例" },
+            { policyId: "P-sla-001", keyword: "sla", content: "SLA 补偿示例" },
+          ],
+        },
+      }),
+    },
+  ];
+  const actionEvidence = buildActionDecisionEvidence(steps);
+
+  assert.ok(!JSON.stringify(actionEvidence).includes("matches"), "Top-K 次要候选不得进入动作决策证据");
+  const result = await generateText({
+    ...buildActionPlanPrompt({
+      task: "处理工单 T-1001",
+      ticketContext: {
+        id: "T-1001",
+        title: "客户申请退款",
+        description: "VIP 客户申请退款。",
+      },
+      evidence: actionEvidence,
+      businessDate: "2026-07-01",
+    }),
+    temperature: 0.1,
+  });
+  const plan = JSON.parse(result.text) as AgentPlan;
+
+  assert.deepEqual(plan.steps.map((step) => step.allowedTools[0]), ["createRefund", "updateTicketStatus"]);
+});
+
 test("归一化后的工具参数必须写入 assistant 历史并与真实执行保持一致", async () => {
   const { buildAssistantExecutionMessage } = await import("./executor.js");
   const message = buildAssistantExecutionMessage(

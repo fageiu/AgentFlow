@@ -7,6 +7,7 @@ from agentflow_rag.errors import KnowledgeNoMatchError
 from agentflow_rag.retrieval import (
     FastFusionReranker,
     IdentityReranker,
+    LlamaIndexBM25Source,
     PolicyHybridRetriever,
     RetrievalService,
     build_lexical_websearch_query,
@@ -122,3 +123,36 @@ async def test_fast_fusion_reranker_prefers_stronger_vector_match() -> None:
     result = await FastFusionReranker().rerank("服务中断", [lexical, semantic], 2)
 
     assert [item.node.node_id for item in result] == ["semantic", "lexical"]
+
+
+@pytest.mark.asyncio
+async def test_bm25_source_uses_jieba_and_separates_archived_snapshot() -> None:
+    active = candidate("refund-current", "P-refund-current", "refund", 0.9).node
+    active.text = "VIP 客户可以申请退款并进入人工审批流程"
+    archived = candidate("refund-archived", "P-refund-old", "refund", 0.8).node
+    archived.text = "旧版特殊退款流程已经停止使用"
+    archived.metadata["status"] = "archived"
+    source = LlamaIndexBM25Source(None, similarity_top_k=5)
+    await source.replace_nodes([active], [active, archived])
+
+    current_results = await source.retrieve("旧版特殊", 5)
+    historical_results = await source.retrieve("旧版特殊", 5, include_archived=True)
+
+    assert current_results == []
+    assert historical_results[0].node.node_id == "refund-archived"
+    assert historical_results[0].node.text == archived.text
+    assert "bm25_original_content" not in historical_results[0].node.metadata
+
+
+@pytest.mark.asyncio
+async def test_bm25_source_indexes_policy_title_without_leaking_it_into_content() -> None:
+    approval = candidate("approval", "P-refund-approval", "refund", 0.9).node
+    approval.text = "金额达到对应区间后由具备权限的负责人复核。"
+    approval.metadata["title"] = "退款审批权限矩阵"
+    source = LlamaIndexBM25Source(None, similarity_top_k=5)
+    await source.replace_nodes([approval], [approval])
+
+    results = await source.retrieve("退款审批矩阵", 5)
+
+    assert results[0].node.node_id == "approval"
+    assert results[0].node.text == approval.text

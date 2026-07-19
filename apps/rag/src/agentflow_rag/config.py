@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,6 +31,7 @@ class RagSettings(BaseSettings):
     chunk_overlap: int = 80
     vector_top_k: int = 20
     lexical_top_k: int = 20
+    lexical_mode: Literal["postgres", "bm25"] = "bm25"
     rerank_top_n: int = 10
     result_top_k: int = 5
     minimum_score: float = 0.35
