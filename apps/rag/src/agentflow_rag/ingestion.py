@@ -108,6 +108,7 @@ class IngestionService:
         self.chunk_overlap = chunk_overlap
 
     async def ingest_file(self, path: Path, metadata: PolicyMetadata | None = None) -> IngestionResult:
+        """索引单个文件"""
         document = parse_policy_file(path, metadata)
         # 1. 幂等检查：同一 policy_id+version 且 checksum 相同且已 indexed → 跳过
         existing = await self.repository.find_by_policy_version(

@@ -358,7 +358,7 @@ def reciprocal_rank_fusion(
     rrf_k: int = 60,
     keyword_hint: str | None = None,
 ) -> list[NodeWithScore]:
-    """RRF 根据排名将向量检索和词法检索结果融合。"""
+    """RRF 将向量检索和词法检索结果根据排名融合。"""
     by_id: dict[str, NodeWithScore] = {}
     scores: dict[str, float] = {}
     maximum = 2 / (rrf_k + 1)
