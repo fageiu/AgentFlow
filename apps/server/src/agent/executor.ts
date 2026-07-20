@@ -466,7 +466,7 @@ async function buildPlanStep(run: AgentRun, index: number, ticketContext?: unkno
     }),
   );
 
-  const planValue = completeInitialPlanCoverage(parseAgentPlan(plan.value.text), run.task, Boolean(ticketContext));
+  const planValue = parseInitialPlanWithCoverage(plan.value.text, run.task, Boolean(ticketContext));
 
   return {
     plan: planValue,
@@ -890,6 +890,26 @@ function summarizeStepsForFinalPrompt(steps: AgentStep[]) {
       toolName: step.toolName,
       detail: step.detail.length > 1800 ? `${step.detail.slice(0, 1800)}...` : step.detail,
     }));
+}
+
+/**
+ * 单工单已预读取时，Planner 格式波动不能中断安全核查；服务端仅补齐固定只读步骤，
+ * 写入仍必须等待 Action Planner 和后续审批，避免把模型解析失败转化为越权动作。
+ */
+export function parseInitialPlanWithCoverage(raw: string, task: string, hasTicketContext: boolean) {
+  try {
+    return completeInitialPlanCoverage(parseAgentPlan(raw), task, hasTicketContext);
+  } catch (error) {
+    if (!hasTicketContext || !extractProcessTicketId(task)) {
+      throw error;
+    }
+
+    return completeInitialPlanCoverage({
+      version: 1,
+      summary: "Planner 输出不可执行，服务端根据可信工单上下文补齐只读核查步骤。",
+      steps: [],
+    }, task, true);
+  }
 }
 
 /**

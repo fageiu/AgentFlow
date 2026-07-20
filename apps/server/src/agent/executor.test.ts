@@ -125,6 +125,30 @@ test("明确的工单集合查询仍应确定性使用 listTickets", async () =>
   assert.deepEqual(completed.steps.map((step) => step.allowedTools[0]), ["listTickets"]);
 });
 
+test("单工单已有可信上下文时 Planner 合同失败应回退为固定只读核查计划", async () => {
+  const { parseInitialPlanWithCoverage } = await import("./executor.js");
+  const task = "处理工单 T-1002：查询补开发票的政策依据，只生成客服答复。";
+
+  const emptyPlan = parseInitialPlanWithCoverage(
+    JSON.stringify({ version: 1, summary: "无需处理", steps: [] }),
+    task,
+    true,
+  );
+  const invalidPlan = parseInitialPlanWithCoverage(
+    JSON.stringify({ version: 2, summary: "格式错误", steps: "invalid" }),
+    task,
+    true,
+  );
+
+  for (const plan of [emptyPlan, invalidPlan]) {
+    assert.deepEqual(
+      plan.steps.map((step) => step.allowedTools[0]),
+      ["getCustomer", "getOrder", "searchPolicy"],
+    );
+    assert.ok(plan.steps.every((step) => !step.requiresApproval));
+  }
+});
+
 test("Replanner Prompt 应明确要求首先重试失败工具", async () => {
   const { buildPlanPrompt } = await import("../llm/prompts.js");
   const prompt = buildPlanPrompt("处理工单 T-1001", {
@@ -447,6 +471,53 @@ test("结构化业务决策必须引用可信事实并生成结果关联推荐",
   assert.ok(enriched.conclusion?.result.includes("需要人工评估"));
   assert.ok(enriched.conclusion?.basis.includes("因此"));
   assert.ok(enriched.conclusion?.nextStep.includes("执行条件"));
+});
+
+test("集合查询的结构化结论必须保留可信工具返回的工单字段", async () => {
+  const { enrichOutcomeWithBusinessDecision } = await import("./businessDecision.js");
+  const deterministicResult = "查询完成，共 2 条结果：T-1001、状态 open、优先级 high、客户 C-9001；T-1002、状态 open、优先级 medium、客户 C-9002。";
+  const outcome = {
+    decision: "read_only" as const,
+    performedActions: [],
+    evidence: ["T-1001", "T-1002"],
+    userMessage: "任务已完成。",
+    conclusion: {
+      requirement: "查询所有工单。",
+      result: deterministicResult,
+      basis: "未发生业务写入。",
+      nextStep: "无需处理。",
+    },
+  };
+  const packet = {
+    task: "查询所有工单",
+    trustedDecision: "read_only" as const,
+    performedActions: [],
+    facts: [
+      {
+        id: "tool.listTickets.output",
+        source: "listTickets",
+        description: "listTickets 的可信输出",
+        value: [{ id: "T-1001" }, { id: "T-1002" }],
+      },
+      { id: "outcome.decision", source: "server", description: "可信决策", value: "read_only" },
+    ],
+  };
+  const raw = JSON.stringify({
+    reasoning: [{ claim: "查询返回两条工单。", evidenceIds: ["tool.listTickets.output"] }],
+    result: "已完成查询，共返回两条工单。",
+    recommendation: {
+      action: "结束查询",
+      owner: "agent",
+      reason: "查询已经完成",
+      evidenceIds: ["outcome.decision"],
+    },
+  });
+
+  const enriched = enrichOutcomeWithBusinessDecision(outcome, packet, raw);
+  assert.equal(enriched.decisionSource, "llm_validated");
+  assert.equal(enriched.conclusion?.result, deterministicResult);
+  assert.ok(enriched.conclusion?.result.includes("T-1001"));
+  assert.ok(enriched.conclusion?.result.includes("T-1002"));
 });
 
 test("未知证据或虚假写入声明应回退确定性 Outcome", async () => {

@@ -79,12 +79,12 @@ async def initialize_runtime(
             reranker = LlamaIndexSentenceReranker(settings.reranker_model)
             await asyncio.to_thread(reranker.load, settings.rerank_top_n)  # 预加载，避免首次查询冷启动
             candidate_top_n = settings.rerank_top_n
-        else:                                                      # CPU/演示模式：用无模型恒等重排序，节省显存
+        else:                                                 # CPU/演示模式：用无模型恒等重排序，节省显存
             # CPU 演示模式保留混合召回与分数契约，完整 BGE 重排由真实评测配置启用。
             reranker = FastFusionReranker()
             candidate_top_n = max(settings.vector_top_k, settings.lexical_top_k)
         readiness.set_models_ready(True)
-    except Exception as error:                                     # 模型加载失败 → 标记 not ready，服务仍可启动
+    except Exception as error:                               # 模型加载失败 → 标记 not ready，服务仍可启动
         readiness.set_models_ready(False, type(error).__name__)
         logger.exception("knowledge_model_initialization_failed")
         return RuntimeResources(engine)
@@ -93,7 +93,7 @@ async def initialize_runtime(
     try:
         # ③-1 创建 PGVectorStore（perform_setup=True 自动建 policy_nodes 表）
         vector_store = create_pg_vector_store(settings.database_url, settings.embedding_dimension)
-        repository = SqlDocumentRepository(sessions)               # 文档元数据仓库（CRUD knowledge_documents 表）
+        repository = SqlDocumentRepository(sessions)         # 文档元数据仓库（CRUD knowledge_documents 表）
         node_store = PostgresNodeStore(vector_store, sessions)      # 向量 + 词法双写入存储
         ingestion = IngestionService(
             repository,

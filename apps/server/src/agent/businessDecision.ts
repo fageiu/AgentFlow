@@ -248,6 +248,9 @@ export function enrichOutcomeWithBusinessDecision(
     decision.recommendation.condition ? `执行条件：${decision.recommendation.condition}` : undefined,
     `推荐原因：${decision.recommendation.reason}`,
   ].filter((item): item is string => Boolean(item));
+  const hasTicketCollection = packet.facts.some(
+    (fact) => fact.id === "tool.listTickets.output" || fact.id === "tool.searchTickets.output",
+  );
 
   return {
     ...outcome,
@@ -256,7 +259,8 @@ export function enrichOutcomeWithBusinessDecision(
     decisionSource: "llm_validated",
     conclusion: {
       ...outcome.conclusion,
-      result: ensureSentence(decision.result),
+      // 集合查询结果由服务端完整保留，避免模型只总结数量而遗漏用户要求展示的工单字段。
+      result: hasTicketCollection ? outcome.conclusion.result : ensureSentence(decision.result),
       basis: decision.reasoning.map((item) => ensureSentence(item.claim)).join(""),
       nextStep: recommendationParts.map(ensureSentence).join(""),
     },
