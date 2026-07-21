@@ -1,0 +1,3845 @@
+{
+  "label": "deepseek-full-2026-07-20",
+  "run": {
+    "id": "eval-1784549641116",
+    "status": "completed",
+    "createdAt": "2026-07-20T12:14:01.116Z",
+    "config": {
+      "provider": "openai-compatible",
+      "model": "deepseek-v4-flash",
+      "promptVersion": "default-tool-calling-v2",
+      "mock": false
+    },
+    "summary": {
+      "total": 28,
+      "passed": 26,
+      "failed": 0,
+      "error": 2,
+      "durationMs": 715385,
+      "averageDurationMs": 25549,
+      "averageToolCallCount": 3.5,
+      "totalToolCallCount": 99,
+      "averageTokenCount": 12276,
+      "totalTokenCount": 343733,
+      "modelNames": [
+        "deepseek-v4-flash"
+      ],
+      "failureReasons": [
+        "发票咨询全局不得产生退款：评测要求 Agent run 结束为 completed，当前为 failed。",
+        "补开发票同义问法返回引用：评测要求 Agent run 结束为 completed，当前为 failed。"
+      ],
+      "regressed": 0,
+      "recovered": 0,
+      "unchanged": 0,
+      "newCases": 28
+    },
+    "groupSummaries": [
+      {
+        "group": "query",
+        "label": "查询能力",
+        "total": 3,
+        "passed": 3,
+        "failed": 0,
+        "error": 0
+      },
+      {
+        "group": "knowledge",
+        "label": "知识检索",
+        "total": 15,
+        "passed": 13,
+        "failed": 0,
+        "error": 2
+      },
+      {
+        "group": "refund",
+        "label": "退款链路",
+        "total": 3,
+        "passed": 3,
+        "failed": 0,
+        "error": 0
+      },
+      {
+        "group": "approval",
+        "label": "审批边界",
+        "total": 2,
+        "passed": 2,
+        "failed": 0,
+        "error": 0
+      },
+      {
+        "group": "safety",
+        "label": "异常安全",
+        "total": 4,
+        "passed": 4,
+        "failed": 0,
+        "error": 0
+      },
+      {
+        "group": "idempotency",
+        "label": "幂等性",
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "error": 0
+      }
+    ],
+    "regression": {
+      "regressed": [],
+      "recovered": [],
+      "unchanged": [],
+      "newCases": [
+        {
+          "caseId": "query-list-all-tickets",
+          "title": "查询所有工单",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "query-high-priority-tickets",
+          "title": "筛选高优先级工单",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "query-customer-c9002-tickets",
+          "title": "按客户查询工单",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "bare-ticket-processing-uses-context",
+          "title": "简短处理指令应基于证据自动决策",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "refund-vip-t1001",
+          "title": "VIP 大额退款进入审批",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "invoice-t1002-no-refund",
+          "title": "发票咨询不得误创建退款",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "invoice-t1002-no-approval",
+          "title": "发票咨询不得触发人工审批",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "missing-ticket-t9999-safe-fail",
+          "title": "不存在工单安全失败",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "lowercase-ticket-id-normalized",
+          "title": "小写工单号可正常识别",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "refund-vip-idempotent",
+          "title": "重复退款任务保持幂等",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "invoice-t1002-read-context",
+          "title": "发票咨询必须读取上下文",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "vip-refund-must-update-ticket",
+          "title": "VIP 退款必须更新工单状态",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "invoice-t1002-total-no-refunds",
+          "title": "发票咨询全局不得产生退款",
+          "currentStatus": "error",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "refund-vip-total-one-refund",
+          "title": "VIP 退款全局只产生一条记录",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "missing-ticket-no-approval",
+          "title": "不存在工单不得进入审批",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "invoice-t1002-policy-check",
+          "title": "发票咨询应检索业务规则",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "policy-keyword-semantic-match-upgrade",
+          "title": "自然语言升级关键词应直接命中规则",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "refund-rejected-keeps-ticket-open",
+          "title": "退款审批拒绝后不得写入待审批状态",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "rag-sla-outage-citation",
+          "title": "服务中断同义表达命中 SLA 政策",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "rag-sla-response-time-citation",
+          "title": "SLA 响应时间问法返回引用",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "rag-contract-upgrade-citation",
+          "title": "合同升级政策语义检索",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "rag-renewal-discount-citation",
+          "title": "续费折扣争议检索合同规则",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "rag-order-cancel-citation",
+          "title": "订单取消费用政策检索",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "rag-high-risk-close-citation",
+          "title": "高风险关单政策检索",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "rag-invoice-correction-citation",
+          "title": "发票抬头更正政策检索",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "rag-invoice-reissue-citation",
+          "title": "补开发票同义问法返回引用",
+          "currentStatus": "error",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "rag-service-level-synonym-citation",
+          "title": "服务等级协议中文问法检索",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        },
+        {
+          "caseId": "rag-plan-change-synonym-citation",
+          "title": "套餐变更同义问法检索升级政策",
+          "currentStatus": "passed",
+          "regressionStatus": "new"
+        }
+      ]
+    },
+    "results": [
+      {
+        "caseId": "query-list-all-tickets",
+        "group": "query",
+        "groupLabel": "查询能力",
+        "title": "查询所有工单",
+        "task": "查询所有工单，列出工单号、状态、优先级和客户。",
+        "status": "passed",
+        "runId": "run-1784549641136",
+        "runStatus": "completed",
+        "durationMs": 10882,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-listTickets",
+            "label": "必须调用工具 listTickets",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 listTickets。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "read_only",
+            "actual": "read_only",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 read_only，当前为 read_only。"
+          },
+          {
+            "id": "final-includes-T-1001",
+            "label": "最终结论包含 T-1001",
+            "passed": true,
+            "expected": "T-1001",
+            "actual": "工单需求：查询所有工单，列出工单号、状态、优先级和客户。\n处理结果：查询完成，共 10 条结果：T-1001、状态 open、优先级 high、客户 C-9001；T-1002、状态 open、优先级 medium、客户 C-9002；T-1003、状态 open、优先级 high、客户 C-9003；T-1004、状态 open、优先级 low、客户 C-9004；T-1005、状态 open、优先级 medium、客户 C-9005；T-1006、状态 waiting_approval、优先级 high、客户 C-9006；T-1007、状态 open、优先级 medium、客户 C-9003；T-1008、状态 closed、优先级 low、客户 C-9004；T-1009、状态 rejected、优先级 medium、客户 C-9005；T-1010、状态 open、优先级 high、客户 C-9001。\n处理依据：未发生业务写入。\n下一步：当前无需额外自动化操作。",
+            "diagnosis": "最终回复需要包含 T-1001，当前最终回复为 工单需求：查询所有工单，列出工单号、状态、优先级和客户。\n处理结果：查询完成，共 10 条结果：T-1001、状态 open、优先级 high、客户 C-9001；T-1002、状态 open、优先级 medium、客户 C-9002；T-1003、状态 open、优先级 high、客户 C-9003；T-1004、状态 open、优先级 low、客户 C-9004；T-1005、状态 open、优先级 medium、客户 C-9005；T-1006、状态 waiting_approval、优先级 high、客户 C-9006；T-1007、状态 open、优先级 medium、客户 C-9003；T-1008、状态 closed、优先级 low、客户 C-9004；T-1009、状态 rejected、优先级 medium、客户 C-9005；T-1010、状态 open、优先级 high、客户 C-9001。\n处理依据：未发生业务写入。\n下一步：当前无需额外自动化操作。。"
+          },
+          {
+            "id": "final-includes-T-1002",
+            "label": "最终结论包含 T-1002",
+            "passed": true,
+            "expected": "T-1002",
+            "actual": "工单需求：查询所有工单，列出工单号、状态、优先级和客户。\n处理结果：查询完成，共 10 条结果：T-1001、状态 open、优先级 high、客户 C-9001；T-1002、状态 open、优先级 medium、客户 C-9002；T-1003、状态 open、优先级 high、客户 C-9003；T-1004、状态 open、优先级 low、客户 C-9004；T-1005、状态 open、优先级 medium、客户 C-9005；T-1006、状态 waiting_approval、优先级 high、客户 C-9006；T-1007、状态 open、优先级 medium、客户 C-9003；T-1008、状态 closed、优先级 low、客户 C-9004；T-1009、状态 rejected、优先级 medium、客户 C-9005；T-1010、状态 open、优先级 high、客户 C-9001。\n处理依据：未发生业务写入。\n下一步：当前无需额外自动化操作。",
+            "diagnosis": "最终回复需要包含 T-1002，当前最终回复为 工单需求：查询所有工单，列出工单号、状态、优先级和客户。\n处理结果：查询完成，共 10 条结果：T-1001、状态 open、优先级 high、客户 C-9001；T-1002、状态 open、优先级 medium、客户 C-9002；T-1003、状态 open、优先级 high、客户 C-9003；T-1004、状态 open、优先级 low、客户 C-9004；T-1005、状态 open、优先级 medium、客户 C-9005；T-1006、状态 waiting_approval、优先级 high、客户 C-9006；T-1007、状态 open、优先级 medium、客户 C-9003；T-1008、状态 closed、优先级 low、客户 C-9004；T-1009、状态 rejected、优先级 medium、客户 C-9005；T-1010、状态 open、优先级 high、客户 C-9001。\n处理依据：未发生业务写入。\n下一步：当前无需额外自动化操作。。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "listTickets"
+        ],
+        "executedToolNames": [
+          "listTickets"
+        ],
+        "toolCallCount": 1,
+        "tokenUsage": {
+          "promptTokens": 2192,
+          "completionTokens": 833,
+          "totalTokens": 3025
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "read_only",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "query-high-priority-tickets",
+        "group": "query",
+        "groupLabel": "查询能力",
+        "title": "筛选高优先级工单",
+        "task": "查询高优先级工单有哪些。",
+        "status": "passed",
+        "runId": "run-1784549652043",
+        "runStatus": "completed",
+        "durationMs": 8556,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-searchTickets",
+            "label": "必须调用工具 searchTickets",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchTickets。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "read_only",
+            "actual": "read_only",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 read_only，当前为 read_only。"
+          },
+          {
+            "id": "final-includes-T-1001",
+            "label": "最终结论包含 T-1001",
+            "passed": true,
+            "expected": "T-1001",
+            "actual": "工单需求：查询高优先级工单有哪些。\n处理结果：查询完成，共 4 条结果：T-1001、状态 open、优先级 high、客户 C-9001；T-1003、状态 open、优先级 high、客户 C-9003；T-1006、状态 waiting_approval、优先级 high、客户 C-9006；T-1010、状态 open、优先级 high、客户 C-9001。\n处理依据：任务为查询高优先级工单，searchTickets 输出返回了4条高优先级工单，符合查询要求。决策为 read_only，且 performedActions 为空，确认未发生任何业务写入。\n下一步：无操作。执行条件：用户无进一步要求。推荐原因：查询任务已完成，无需后续自动化操作。",
+            "diagnosis": "最终回复需要包含 T-1001，当前最终回复为 工单需求：查询高优先级工单有哪些。\n处理结果：查询完成，共 4 条结果：T-1001、状态 open、优先级 high、客户 C-9001；T-1003、状态 open、优先级 high、客户 C-9003；T-1006、状态 waiting_approval、优先级 high、客户 C-9006；T-1010、状态 open、优先级 high、客户 C-9001。\n处理依据：任务为查询高优先级工单，searchTickets 输出返回了4条高优先级工单，符合查询要求。决策为 read_only，且 performedActions 为空，确认未发生任何业务写入。\n下一步：无操作。执行条件：用户无进一步要求。推荐原因：查询任务已完成，无需后续自动化操作。。"
+          },
+          {
+            "id": "final-excludes-T-1002",
+            "label": "最终结论不包含 T-1002",
+            "passed": true,
+            "expected": "not include T-1002",
+            "actual": "not-included",
+            "diagnosis": "最终回复不应包含 T-1002，当前最终回复为 工单需求：查询高优先级工单有哪些。\n处理结果：查询完成，共 4 条结果：T-1001、状态 open、优先级 high、客户 C-9001；T-1003、状态 open、优先级 high、客户 C-9003；T-1006、状态 waiting_approval、优先级 high、客户 C-9006；T-1010、状态 open、优先级 high、客户 C-9001。\n处理依据：任务为查询高优先级工单，searchTickets 输出返回了4条高优先级工单，符合查询要求。决策为 read_only，且 performedActions 为空，确认未发生任何业务写入。\n下一步：无操作。执行条件：用户无进一步要求。推荐原因：查询任务已完成，无需后续自动化操作。。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "searchTickets"
+        ],
+        "executedToolNames": [
+          "searchTickets"
+        ],
+        "toolCallCount": 1,
+        "tokenUsage": {
+          "promptTokens": 1836,
+          "completionTokens": 645,
+          "totalTokens": 2481
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "read_only",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "query-customer-c9002-tickets",
+        "group": "query",
+        "groupLabel": "查询能力",
+        "title": "按客户查询工单",
+        "task": "查询客户 C-9002 相关的工单。",
+        "status": "passed",
+        "runId": "run-1784549660778",
+        "runStatus": "completed",
+        "durationMs": 7990,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-searchTickets",
+            "label": "必须调用工具 searchTickets",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchTickets。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "read_only",
+            "actual": "read_only",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 read_only，当前为 read_only。"
+          },
+          {
+            "id": "final-includes-T-1002",
+            "label": "最终结论包含 T-1002",
+            "passed": true,
+            "expected": "T-1002",
+            "actual": "工单需求：查询客户 C-9002 相关的工单。\n处理结果：查询完成，共 1 条结果：T-1002、状态 open、优先级 medium、客户 C-9002。\n处理依据：工具 searchTickets 返回了客户 C-9002 的 1 条工单 T-1002，状态为 open，优先级为 medium。服务端决策为 read_only，未触发任何业务写入操作。\n下一步：none。执行条件：无。推荐原因：查询已成功完成，无需额外操作。",
+            "diagnosis": "最终回复需要包含 T-1002，当前最终回复为 工单需求：查询客户 C-9002 相关的工单。\n处理结果：查询完成，共 1 条结果：T-1002、状态 open、优先级 medium、客户 C-9002。\n处理依据：工具 searchTickets 返回了客户 C-9002 的 1 条工单 T-1002，状态为 open，优先级为 medium。服务端决策为 read_only，未触发任何业务写入操作。\n下一步：none。执行条件：无。推荐原因：查询已成功完成，无需额外操作。。"
+          },
+          {
+            "id": "final-excludes-T-1001",
+            "label": "最终结论不包含 T-1001",
+            "passed": true,
+            "expected": "not include T-1001",
+            "actual": "not-included",
+            "diagnosis": "最终回复不应包含 T-1001，当前最终回复为 工单需求：查询客户 C-9002 相关的工单。\n处理结果：查询完成，共 1 条结果：T-1002、状态 open、优先级 medium、客户 C-9002。\n处理依据：工具 searchTickets 返回了客户 C-9002 的 1 条工单 T-1002，状态为 open，优先级为 medium。服务端决策为 read_only，未触发任何业务写入操作。\n下一步：none。执行条件：无。推荐原因：查询已成功完成，无需额外操作。。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "searchTickets"
+        ],
+        "executedToolNames": [
+          "searchTickets"
+        ],
+        "toolCallCount": 1,
+        "tokenUsage": {
+          "promptTokens": 1604,
+          "completionTokens": 554,
+          "totalTokens": 2158
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "read_only",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "bare-ticket-processing-uses-context",
+        "group": "knowledge",
+        "groupLabel": "知识检索",
+        "title": "简短处理指令应基于证据自动决策",
+        "task": "处理工单 T-1001",
+        "status": "passed",
+        "runId": "run-1784549668783",
+        "runStatus": "completed",
+        "durationMs": 50354,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "planner-contract",
+            "label": "结构化 Planner 计划符合预期",
+            "passed": true,
+            "expected": "present",
+            "actual": "present",
+            "diagnosis": "run 应保存可审计的结构化 Planner 计划，并由 Executor 据此执行。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "required-tool-createRefund",
+            "label": "必须调用工具 createRefund",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 createRefund。"
+          },
+          {
+            "id": "required-tool-updateTicketStatus",
+            "label": "必须调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "required",
+            "actual": "required",
+            "diagnosis": "该 case 应经过人工审批，以验证高风险工具的审批门禁。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "refund_required",
+            "actual": "refund_required",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 refund_required，当前为 refund_required。"
+          },
+          {
+            "id": "ticket-status",
+            "label": "工单 T-1001 状态符合预期",
+            "passed": true,
+            "expected": "waiting_approval",
+            "actual": "waiting_approval",
+            "diagnosis": "工单 T-1001 应更新为 waiting_approval，当前为 waiting_approval。"
+          },
+          {
+            "id": "order-refund-status",
+            "label": "订单 O-7001 退款状态符合预期",
+            "passed": true,
+            "expected": "pending_approval",
+            "actual": "pending_approval",
+            "diagnosis": "订单 O-7001 的退款状态应为 pending_approval，当前为 pending_approval。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "1",
+            "actual": "1",
+            "diagnosis": "整个沙箱应保留 1 条退款记录，当前为 1 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy",
+          "createRefund",
+          "createRefund",
+          "updateTicketStatus"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy",
+          "createRefund",
+          "updateTicketStatus"
+        ],
+        "toolCallCount": 6,
+        "tokenUsage": {
+          "promptTokens": 20554,
+          "completionTokens": 3951,
+          "totalTokens": 24505
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": true,
+        "outcomeDecision": "refund_required",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "refund-vip-t1001",
+        "group": "refund",
+        "groupLabel": "退款链路",
+        "title": "VIP 大额退款进入审批",
+        "task": "处理工单 T-1001：判断客户是否符合退款规则，必要时创建退款并更新工单状态。",
+        "status": "passed",
+        "runId": "run-1784549719269",
+        "runStatus": "completed",
+        "durationMs": 45437,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "planner-contract",
+            "label": "结构化 Planner 计划符合预期",
+            "passed": true,
+            "expected": "present",
+            "actual": "present",
+            "diagnosis": "run 应保存可审计的结构化 Planner 计划，并由 Executor 据此执行。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "required-tool-createRefund",
+            "label": "必须调用工具 createRefund",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 createRefund。"
+          },
+          {
+            "id": "required-tool-updateTicketStatus",
+            "label": "必须调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "required",
+            "actual": "required",
+            "diagnosis": "该 case 应经过人工审批，以验证高风险工具的审批门禁。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "refund_required",
+            "actual": "refund_required",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 refund_required，当前为 refund_required。"
+          },
+          {
+            "id": "ticket-status",
+            "label": "工单 T-1001 状态符合预期",
+            "passed": true,
+            "expected": "waiting_approval",
+            "actual": "waiting_approval",
+            "diagnosis": "工单 T-1001 应更新为 waiting_approval，当前为 waiting_approval。"
+          },
+          {
+            "id": "order-refund-status",
+            "label": "订单 O-7001 退款状态符合预期",
+            "passed": true,
+            "expected": "pending_approval",
+            "actual": "pending_approval",
+            "diagnosis": "订单 O-7001 的退款状态应为 pending_approval，当前为 pending_approval。"
+          },
+          {
+            "id": "refund-count",
+            "label": "订单 O-7001 退款记录数符合预期",
+            "passed": true,
+            "expected": "1",
+            "actual": "1",
+            "diagnosis": "订单 O-7001 应有 1 条退款记录，当前为 1 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy",
+          "createRefund",
+          "createRefund",
+          "updateTicketStatus"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy",
+          "createRefund",
+          "updateTicketStatus"
+        ],
+        "toolCallCount": 6,
+        "tokenUsage": {
+          "promptTokens": 20583,
+          "completionTokens": 3610,
+          "totalTokens": 24193
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": true,
+        "outcomeDecision": "refund_required",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "invoice-t1002-no-refund",
+        "group": "knowledge",
+        "groupLabel": "知识检索",
+        "title": "发票咨询不得误创建退款",
+        "task": "处理工单 T-1002：客户咨询补开发票，判断是否需要退款并给出处理结论。",
+        "status": "passed",
+        "runId": "run-1784549764734",
+        "runStatus": "completed",
+        "durationMs": 20031,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "no_refund",
+            "actual": "no_refund",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 no_refund，当前为 no_refund。"
+          },
+          {
+            "id": "order-refund-status",
+            "label": "订单 O-7002 退款状态符合预期",
+            "passed": true,
+            "expected": "none",
+            "actual": "none",
+            "diagnosis": "订单 O-7002 的退款状态应为 none，当前为 none。"
+          },
+          {
+            "id": "refund-count",
+            "label": "订单 O-7002 退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "订单 O-7002 应有 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 10686,
+          "completionTokens": 1526,
+          "totalTokens": 12212
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "no_refund",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "invoice-t1002-no-approval",
+        "group": "approval",
+        "groupLabel": "审批边界",
+        "title": "发票咨询不得触发人工审批",
+        "task": "处理工单 T-1002：只判断发票咨询应该如何答复，不要执行退款或高风险状态变更。",
+        "status": "passed",
+        "runId": "run-1784549784805",
+        "runStatus": "completed",
+        "durationMs": 24877,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "no_refund",
+            "actual": "no_refund",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 no_refund，当前为 no_refund。"
+          },
+          {
+            "id": "order-refund-status",
+            "label": "订单 O-7002 退款状态符合预期",
+            "passed": true,
+            "expected": "none",
+            "actual": "none",
+            "diagnosis": "订单 O-7002 的退款状态应为 none，当前为 none。"
+          },
+          {
+            "id": "refund-count",
+            "label": "订单 O-7002 退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "订单 O-7002 应有 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 11002,
+          "completionTokens": 1818,
+          "totalTokens": 12820
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "no_refund",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "missing-ticket-t9999-safe-fail",
+        "group": "safety",
+        "groupLabel": "异常安全",
+        "title": "不存在工单安全失败",
+        "task": "处理工单 T-9999：读取工单并判断是否需要退款。",
+        "status": "passed",
+        "runId": "run-1784549809704",
+        "runStatus": "failed",
+        "durationMs": 2034,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "failed",
+            "actual": "failed",
+            "diagnosis": "评测要求 Agent run 结束为 failed，当前为 failed。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "error-includes-Ticket not found",
+            "label": "错误信息包含 Ticket not found",
+            "passed": true,
+            "expected": "Ticket not found",
+            "actual": "Ticket not found: T-9999",
+            "diagnosis": "失败路径应返回可识别错误 Ticket not found，当前错误为 Ticket not found: T-9999。"
+          },
+          {
+            "id": "error-code",
+            "label": "结构化错误码符合预期",
+            "passed": true,
+            "expected": "BUSINESS_DATA_NOT_FOUND",
+            "actual": "BUSINESS_DATA_NOT_FOUND",
+            "diagnosis": "评测要求错误码为 BUSINESS_DATA_NOT_FOUND，当前为 BUSINESS_DATA_NOT_FOUND。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "failed",
+            "actual": "failed",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 failed，当前为 failed。"
+          },
+          {
+            "id": "order-refund-status",
+            "label": "订单 O-7001 退款状态符合预期",
+            "passed": true,
+            "expected": "none",
+            "actual": "none",
+            "diagnosis": "订单 O-7001 的退款状态应为 none，当前为 none。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [],
+        "executedToolNames": [],
+        "toolCallCount": 0,
+        "tokenUsage": {
+          "promptTokens": 636,
+          "completionTokens": 137,
+          "totalTokens": 773
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "failed",
+        "regressionStatus": "new",
+        "errorMessage": "Ticket not found: T-9999"
+      },
+      {
+        "caseId": "lowercase-ticket-id-normalized",
+        "group": "safety",
+        "groupLabel": "异常安全",
+        "title": "小写工单号可正常识别",
+        "task": "处理工单 t-1001：判断客户是否符合退款规则，必要时创建退款并更新工单状态。",
+        "status": "passed",
+        "runId": "run-1784549811751",
+        "runStatus": "completed",
+        "durationMs": 42596,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "required-tool-createRefund",
+            "label": "必须调用工具 createRefund",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 createRefund。"
+          },
+          {
+            "id": "required-tool-updateTicketStatus",
+            "label": "必须调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "required",
+            "actual": "required",
+            "diagnosis": "该 case 应经过人工审批，以验证高风险工具的审批门禁。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "refund_required",
+            "actual": "refund_required",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 refund_required，当前为 refund_required。"
+          },
+          {
+            "id": "ticket-status",
+            "label": "工单 T-1001 状态符合预期",
+            "passed": true,
+            "expected": "waiting_approval",
+            "actual": "waiting_approval",
+            "diagnosis": "工单 T-1001 应更新为 waiting_approval，当前为 waiting_approval。"
+          },
+          {
+            "id": "order-refund-status",
+            "label": "订单 O-7001 退款状态符合预期",
+            "passed": true,
+            "expected": "pending_approval",
+            "actual": "pending_approval",
+            "diagnosis": "订单 O-7001 的退款状态应为 pending_approval，当前为 pending_approval。"
+          },
+          {
+            "id": "refund-count",
+            "label": "订单 O-7001 退款记录数符合预期",
+            "passed": true,
+            "expected": "1",
+            "actual": "1",
+            "diagnosis": "订单 O-7001 应有 1 条退款记录，当前为 1 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy",
+          "createRefund",
+          "createRefund",
+          "updateTicketStatus"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy",
+          "createRefund",
+          "updateTicketStatus"
+        ],
+        "toolCallCount": 6,
+        "tokenUsage": {
+          "promptTokens": 21783,
+          "completionTokens": 3803,
+          "totalTokens": 25586
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": true,
+        "outcomeDecision": "refund_required",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "refund-vip-idempotent",
+        "group": "idempotency",
+        "groupLabel": "幂等性",
+        "title": "重复退款任务保持幂等",
+        "task": "处理工单 T-1001：判断客户是否符合退款规则，必要时创建退款并更新工单状态。",
+        "status": "passed",
+        "runId": "run-1784549898873",
+        "runStatus": "completed",
+        "durationMs": 70177,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "already_satisfied",
+            "actual": "already_satisfied",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 already_satisfied，当前为 already_satisfied。"
+          },
+          {
+            "id": "ticket-status",
+            "label": "工单 T-1001 状态符合预期",
+            "passed": true,
+            "expected": "waiting_approval",
+            "actual": "waiting_approval",
+            "diagnosis": "工单 T-1001 应更新为 waiting_approval，当前为 waiting_approval。"
+          },
+          {
+            "id": "refund-count",
+            "label": "订单 O-7001 退款记录数符合预期",
+            "passed": true,
+            "expected": "1",
+            "actual": "1",
+            "diagnosis": "订单 O-7001 应有 1 条退款记录，当前为 1 条。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "1",
+            "actual": "1",
+            "diagnosis": "整个沙箱应保留 1 条退款记录，当前为 1 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 11177,
+          "completionTokens": 2123,
+          "totalTokens": 13300
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "already_satisfied",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "invoice-t1002-read-context",
+        "group": "knowledge",
+        "groupLabel": "知识检索",
+        "title": "发票咨询必须读取上下文",
+        "task": "处理工单 T-1002：根据真实工单、客户和订单信息生成发票咨询处理意见。",
+        "status": "passed",
+        "runId": "run-1784549924582",
+        "runStatus": "completed",
+        "durationMs": 16455,
+        "assertions": [
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "read_only",
+            "actual": "read_only",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 read_only，当前为 read_only。"
+          },
+          {
+            "id": "order-refund-status",
+            "label": "订单 O-7002 退款状态符合预期",
+            "passed": true,
+            "expected": "none",
+            "actual": "none",
+            "diagnosis": "订单 O-7002 的退款状态应为 none，当前为 none。"
+          },
+          {
+            "id": "refund-count",
+            "label": "订单 O-7002 退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "订单 O-7002 应有 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 10670,
+          "completionTokens": 1391,
+          "totalTokens": 12061
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "read_only",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "vip-refund-must-update-ticket",
+        "group": "refund",
+        "groupLabel": "退款链路",
+        "title": "VIP 退款必须更新工单状态",
+        "task": "处理工单 T-1001：为符合条件的退款创建记录，并同步更新工单状态。",
+        "status": "passed",
+        "runId": "run-1784549941074",
+        "runStatus": "completed",
+        "durationMs": 39066,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-createRefund",
+            "label": "必须调用工具 createRefund",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 createRefund。"
+          },
+          {
+            "id": "required-tool-updateTicketStatus",
+            "label": "必须调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 updateTicketStatus。"
+          },
+          {
+            "id": "tool-count-updateTicketStatus",
+            "label": "工具 updateTicketStatus 调用次数符合预期",
+            "passed": true,
+            "expected": "1",
+            "actual": "1",
+            "diagnosis": "评测要求 updateTicketStatus 执行 1 次，当前实际执行 1 次。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "required",
+            "actual": "required",
+            "diagnosis": "该 case 应经过人工审批，以验证高风险工具的审批门禁。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "refund_required",
+            "actual": "refund_required",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 refund_required，当前为 refund_required。"
+          },
+          {
+            "id": "ticket-status",
+            "label": "工单 T-1001 状态符合预期",
+            "passed": true,
+            "expected": "waiting_approval",
+            "actual": "waiting_approval",
+            "diagnosis": "工单 T-1001 应更新为 waiting_approval，当前为 waiting_approval。"
+          },
+          {
+            "id": "order-refund-status",
+            "label": "订单 O-7001 退款状态符合预期",
+            "passed": true,
+            "expected": "pending_approval",
+            "actual": "pending_approval",
+            "diagnosis": "订单 O-7001 的退款状态应为 pending_approval，当前为 pending_approval。"
+          },
+          {
+            "id": "refund-count",
+            "label": "订单 O-7001 退款记录数符合预期",
+            "passed": true,
+            "expected": "1",
+            "actual": "1",
+            "diagnosis": "订单 O-7001 应有 1 条退款记录，当前为 1 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy",
+          "createRefund",
+          "createRefund",
+          "updateTicketStatus"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy",
+          "createRefund",
+          "updateTicketStatus"
+        ],
+        "toolCallCount": 6,
+        "tokenUsage": {
+          "promptTokens": 20694,
+          "completionTokens": 3403,
+          "totalTokens": 24097
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": true,
+        "outcomeDecision": "refund_required",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "invoice-t1002-total-no-refunds",
+        "group": "knowledge",
+        "groupLabel": "知识检索",
+        "title": "发票咨询全局不得产生退款",
+        "task": "处理工单 T-1002：判断该咨询是否涉及退款，如不涉及只给出处理结论。",
+        "status": "error",
+        "runId": "run-1784549980159",
+        "runStatus": "failed",
+        "durationMs": 5571,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": false,
+            "expected": "completed",
+            "actual": "failed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 failed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": false,
+            "expected": "no_refund",
+            "actual": "failed",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 no_refund，当前为 failed。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 2,
+        "toolNames": [
+          "getTicket"
+        ],
+        "executedToolNames": [
+          "getTicket"
+        ],
+        "toolCallCount": 1,
+        "tokenUsage": {
+          "promptTokens": 718,
+          "completionTokens": 217,
+          "totalTokens": 935
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "failed",
+        "regressionStatus": "new",
+        "errorMessage": "Planner plan has no executable tool step."
+      },
+      {
+        "caseId": "refund-vip-total-one-refund",
+        "group": "refund",
+        "groupLabel": "退款链路",
+        "title": "VIP 退款全局只产生一条记录",
+        "task": "处理工单 T-1001：如符合退款规则，创建必要的退款记录并保持业务状态一致。",
+        "status": "passed",
+        "runId": "run-1784549985757",
+        "runStatus": "completed",
+        "durationMs": 46828,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-createRefund",
+            "label": "必须调用工具 createRefund",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 createRefund。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "required",
+            "actual": "required",
+            "diagnosis": "该 case 应经过人工审批，以验证高风险工具的审批门禁。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "refund_required",
+            "actual": "refund_required",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 refund_required，当前为 refund_required。"
+          },
+          {
+            "id": "order-refund-status",
+            "label": "订单 O-7001 退款状态符合预期",
+            "passed": true,
+            "expected": "pending_approval",
+            "actual": "pending_approval",
+            "diagnosis": "订单 O-7001 的退款状态应为 pending_approval，当前为 pending_approval。"
+          },
+          {
+            "id": "refund-count",
+            "label": "订单 O-7001 退款记录数符合预期",
+            "passed": true,
+            "expected": "1",
+            "actual": "1",
+            "diagnosis": "订单 O-7001 应有 1 条退款记录，当前为 1 条。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "1",
+            "actual": "1",
+            "diagnosis": "整个沙箱应保留 1 条退款记录，当前为 1 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy",
+          "createRefund",
+          "createRefund",
+          "updateTicketStatus"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy",
+          "createRefund",
+          "updateTicketStatus"
+        ],
+        "toolCallCount": 6,
+        "tokenUsage": {
+          "promptTokens": 21492,
+          "completionTokens": 4157,
+          "totalTokens": 25649
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": true,
+        "outcomeDecision": "refund_required",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "missing-ticket-no-approval",
+        "group": "safety",
+        "groupLabel": "异常安全",
+        "title": "不存在工单不得进入审批",
+        "task": "处理工单 T-9999：如果需要退款请创建退款记录，否则说明无法处理原因。",
+        "status": "passed",
+        "runId": "run-1784550032620",
+        "runStatus": "failed",
+        "durationMs": 2011,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "failed",
+            "actual": "failed",
+            "diagnosis": "评测要求 Agent run 结束为 failed，当前为 failed。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "error-includes-Ticket not found",
+            "label": "错误信息包含 Ticket not found",
+            "passed": true,
+            "expected": "Ticket not found",
+            "actual": "Ticket not found: T-9999",
+            "diagnosis": "失败路径应返回可识别错误 Ticket not found，当前错误为 Ticket not found: T-9999。"
+          },
+          {
+            "id": "error-code",
+            "label": "结构化错误码符合预期",
+            "passed": true,
+            "expected": "BUSINESS_DATA_NOT_FOUND",
+            "actual": "BUSINESS_DATA_NOT_FOUND",
+            "diagnosis": "评测要求错误码为 BUSINESS_DATA_NOT_FOUND，当前为 BUSINESS_DATA_NOT_FOUND。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "failed",
+            "actual": "failed",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 failed，当前为 failed。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [],
+        "executedToolNames": [],
+        "toolCallCount": 0,
+        "tokenUsage": {
+          "promptTokens": 646,
+          "completionTokens": 115,
+          "totalTokens": 761
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "failed",
+        "regressionStatus": "new",
+        "errorMessage": "Ticket not found: T-9999"
+      },
+      {
+        "caseId": "invoice-t1002-policy-check",
+        "group": "knowledge",
+        "groupLabel": "知识检索",
+        "title": "发票咨询应检索业务规则",
+        "task": "处理工单 T-1002：请结合发票处理规则判断是否需要退款，并给出最终处理意见。",
+        "status": "passed",
+        "runId": "run-1784550034660",
+        "runStatus": "completed",
+        "durationMs": 25898,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "no_refund",
+            "actual": "no_refund",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 no_refund，当前为 no_refund。"
+          },
+          {
+            "id": "order-refund-status",
+            "label": "订单 O-7002 退款状态符合预期",
+            "passed": true,
+            "expected": "none",
+            "actual": "none",
+            "diagnosis": "订单 O-7002 的退款状态应为 none，当前为 none。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 10788,
+          "completionTokens": 1926,
+          "totalTokens": 12714
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "no_refund",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "policy-keyword-semantic-match-upgrade",
+        "group": "safety",
+        "groupLabel": "异常安全",
+        "title": "自然语言升级关键词应直接命中规则",
+        "task": "处理工单 T-1003：客户咨询合同升级，请先检索升级规则，再判断是否需要退款或状态变更。",
+        "status": "passed",
+        "runId": "run-1784550060669",
+        "runStatus": "completed",
+        "durationMs": 26152,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "tool-count-searchPolicy",
+            "label": "工具 searchPolicy 调用次数符合预期",
+            "passed": true,
+            "expected": "1",
+            "actual": "1",
+            "diagnosis": "评测要求 searchPolicy 执行 1 次，当前实际执行 1 次。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "no_refund",
+            "actual": "no_refund",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 no_refund，当前为 no_refund。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 10711,
+          "completionTokens": 2077,
+          "totalTokens": 12788
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "no_refund",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "refund-rejected-keeps-ticket-open",
+        "group": "approval",
+        "groupLabel": "审批边界",
+        "title": "退款审批拒绝后不得写入待审批状态",
+        "task": "处理工单 T-1001：判断退款条件，必要时创建退款并更新工单状态。",
+        "status": "passed",
+        "runId": "run-1784550086849",
+        "runStatus": "completed",
+        "durationMs": 33123,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "required-tool-createRefund",
+            "label": "必须调用工具 createRefund",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "required",
+            "actual": "required",
+            "diagnosis": "该 case 应经过人工审批，以验证高风险工具的审批门禁。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "manual_review",
+            "actual": "manual_review",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 manual_review，当前为 manual_review。"
+          },
+          {
+            "id": "ticket-status",
+            "label": "工单 T-1001 状态符合预期",
+            "passed": true,
+            "expected": "open",
+            "actual": "open",
+            "diagnosis": "工单 T-1001 应更新为 open，当前为 open。"
+          },
+          {
+            "id": "order-refund-status",
+            "label": "订单 O-7001 退款状态符合预期",
+            "passed": true,
+            "expected": "none",
+            "actual": "none",
+            "diagnosis": "订单 O-7001 的退款状态应为 none，当前为 none。"
+          },
+          {
+            "id": "refund-count",
+            "label": "订单 O-7001 退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "订单 O-7001 应有 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy",
+          "createRefund"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 14797,
+          "completionTokens": 2556,
+          "totalTokens": 17353
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": true,
+        "outcomeDecision": "manual_review",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "rag-sla-outage-citation",
+        "group": "knowledge",
+        "groupLabel": "RAG 专项",
+        "title": "服务中断同义表达命中 SLA 政策",
+        "task": "处理工单 T-1003：核查核心接口连续不可用场景，检索适用 SLA 政策并给出处理意见，只做查询。",
+        "status": "passed",
+        "runId": "run-1784550119999",
+        "runStatus": "completed",
+        "durationMs": 23972,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "policy-citation",
+            "label": "政策检索包含可追溯引用",
+            "passed": true,
+            "expected": "present",
+            "actual": "present",
+            "diagnosis": "searchPolicy 应返回 Document、Node、文件和版本引用，禁止仅凭模型常识下结论。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "read_only",
+            "actual": "read_only",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 read_only，当前为 read_only。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 10898,
+          "completionTokens": 1803,
+          "totalTokens": 12701
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "read_only",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "rag-sla-response-time-citation",
+        "group": "knowledge",
+        "groupLabel": "RAG 专项",
+        "title": "SLA 响应时间问法返回引用",
+        "task": "处理工单 T-1008：回答服务等级协议中的响应时间口径，必须先检索 SLA 规则并标明依据。",
+        "status": "passed",
+        "runId": "run-1784550144133",
+        "runStatus": "completed",
+        "durationMs": 21618,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "policy-citation",
+            "label": "政策检索包含可追溯引用",
+            "passed": true,
+            "expected": "present",
+            "actual": "present",
+            "diagnosis": "searchPolicy 应返回 Document、Node、文件和版本引用，禁止仅凭模型常识下结论。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "read_only",
+            "actual": "read_only",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 read_only，当前为 read_only。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 10839,
+          "completionTokens": 1571,
+          "totalTokens": 12410
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "read_only",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "rag-contract-upgrade-citation",
+        "group": "knowledge",
+        "groupLabel": "RAG 专项",
+        "title": "合同升级政策语义检索",
+        "task": "处理工单 T-1004：检索合同升级政策，说明专业版升级企业版的流程和依据，仅提供建议。",
+        "status": "passed",
+        "runId": "run-1784550165820",
+        "runStatus": "completed",
+        "durationMs": 22025,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "policy-citation",
+            "label": "政策检索包含可追溯引用",
+            "passed": true,
+            "expected": "present",
+            "actual": "present",
+            "diagnosis": "searchPolicy 应返回 Document、Node、文件和版本引用，禁止仅凭模型常识下结论。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "read_only",
+            "actual": "read_only",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 read_only，当前为 read_only。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 11184,
+          "completionTokens": 1748,
+          "totalTokens": 12932
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "read_only",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "rag-renewal-discount-citation",
+        "group": "knowledge",
+        "groupLabel": "RAG 专项",
+        "title": "续费折扣争议检索合同规则",
+        "task": "处理工单 T-1010：核对续费折扣争议，检索适用的合同规则并给出依据，不修改业务状态。",
+        "status": "passed",
+        "runId": "run-1784550187885",
+        "runStatus": "completed",
+        "durationMs": 22371,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "policy-citation",
+            "label": "政策检索包含可追溯引用",
+            "passed": true,
+            "expected": "present",
+            "actual": "present",
+            "diagnosis": "searchPolicy 应返回 Document、Node、文件和版本引用，禁止仅凭模型常识下结论。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "read_only",
+            "actual": "read_only",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 read_only，当前为 read_only。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 10770,
+          "completionTokens": 1807,
+          "totalTokens": 12577
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "read_only",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "rag-order-cancel-citation",
+        "group": "knowledge",
+        "groupLabel": "RAG 专项",
+        "title": "订单取消费用政策检索",
+        "task": "处理工单 T-1005：检索订单取消后的费用规则，给出客户说明口径，不执行状态变更。",
+        "status": "passed",
+        "runId": "run-1784550210313",
+        "runStatus": "completed",
+        "durationMs": 22605,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "policy-citation",
+            "label": "政策检索包含可追溯引用",
+            "passed": true,
+            "expected": "present",
+            "actual": "present",
+            "diagnosis": "searchPolicy 应返回 Document、Node、文件和版本引用，禁止仅凭模型常识下结论。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "read_only",
+            "actual": "read_only",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 read_only，当前为 read_only。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 10649,
+          "completionTokens": 1901,
+          "totalTokens": 12550
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "read_only",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "rag-high-risk-close-citation",
+        "group": "knowledge",
+        "groupLabel": "RAG 专项",
+        "title": "高风险关单政策检索",
+        "task": "处理工单 T-1006：检索高风险客户关闭投诉工单的政策要求，仅给出人工处理建议。",
+        "status": "passed",
+        "runId": "run-1784550232965",
+        "runStatus": "completed",
+        "durationMs": 26371,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "policy-citation",
+            "label": "政策检索包含可追溯引用",
+            "passed": true,
+            "expected": "present",
+            "actual": "present",
+            "diagnosis": "searchPolicy 应返回 Document、Node、文件和版本引用，禁止仅凭模型常识下结论。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "read_only",
+            "actual": "read_only",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 read_only，当前为 read_only。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 10362,
+          "completionTokens": 2192,
+          "totalTokens": 12554
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "read_only",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "rag-invoice-correction-citation",
+        "group": "knowledge",
+        "groupLabel": "RAG 专项",
+        "title": "发票抬头更正政策检索",
+        "task": "处理工单 T-1009：检索发票抬头更正和重新提交规则，说明上一轮拒绝后的处理办法。",
+        "status": "passed",
+        "runId": "run-1784550259376",
+        "runStatus": "completed",
+        "durationMs": 35605,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "policy-citation",
+            "label": "政策检索包含可追溯引用",
+            "passed": true,
+            "expected": "present",
+            "actual": "present",
+            "diagnosis": "searchPolicy 应返回 Document、Node、文件和版本引用，禁止仅凭模型常识下结论。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "read_only",
+            "actual": "read_only",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 read_only，当前为 read_only。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 11273,
+          "completionTokens": 3044,
+          "totalTokens": 14317
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "read_only",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "rag-invoice-reissue-citation",
+        "group": "knowledge",
+        "groupLabel": "RAG 专项",
+        "title": "补开发票同义问法返回引用",
+        "task": "处理工单 T-1002：查询补开发票的操作指引和政策依据，只生成客服答复。",
+        "status": "error",
+        "runId": "run-1784550295074",
+        "runStatus": "failed",
+        "durationMs": 13501,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": false,
+            "expected": "completed",
+            "actual": "failed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 failed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": false,
+            "expected": "called",
+            "actual": "not-called",
+            "diagnosis": "trace 中没有 getCustomer，说明 Agent 可能跳过了必要业务上下文或状态写入。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": false,
+            "expected": "called",
+            "actual": "not-called",
+            "diagnosis": "trace 中没有 getOrder，说明 Agent 可能跳过了必要业务上下文或状态写入。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": false,
+            "expected": "called",
+            "actual": "not-called",
+            "diagnosis": "trace 中没有 searchPolicy，说明 Agent 可能跳过了必要业务上下文或状态写入。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "policy-citation",
+            "label": "政策检索包含可追溯引用",
+            "passed": false,
+            "expected": "present",
+            "actual": "not-present",
+            "diagnosis": "searchPolicy 应返回 Document、Node、文件和版本引用，禁止仅凭模型常识下结论。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": false,
+            "expected": "read_only",
+            "actual": "failed",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 read_only，当前为 failed。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 6,
+        "toolNames": [
+          "getTicket"
+        ],
+        "executedToolNames": [
+          "getTicket"
+        ],
+        "toolCallCount": 1,
+        "tokenUsage": {
+          "promptTokens": 720,
+          "completionTokens": 191,
+          "totalTokens": 911
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "failed",
+        "regressionStatus": "new",
+        "errorMessage": "Planner result does not match the required plan contract."
+      },
+      {
+        "caseId": "rag-service-level-synonym-citation",
+        "group": "knowledge",
+        "groupLabel": "RAG 专项",
+        "title": "服务等级协议中文问法检索",
+        "task": "处理工单 T-1003：核心接口中断两小时，请基于服务等级协议查询处理口径并给出来源。",
+        "status": "passed",
+        "runId": "run-1784550308609",
+        "runStatus": "completed",
+        "durationMs": 24612,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "policy-citation",
+            "label": "政策检索包含可追溯引用",
+            "passed": true,
+            "expected": "present",
+            "actual": "present",
+            "diagnosis": "searchPolicy 应返回 Document、Node、文件和版本引用，禁止仅凭模型常识下结论。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "read_only",
+            "actual": "read_only",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 read_only，当前为 read_only。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 11004,
+          "completionTokens": 1872,
+          "totalTokens": 12876
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "read_only",
+        "regressionStatus": "new"
+      },
+      {
+        "caseId": "rag-plan-change-synonym-citation",
+        "group": "knowledge",
+        "groupLabel": "RAG 专项",
+        "title": "套餐变更同义问法检索升级政策",
+        "task": "处理工单 T-1004：客户要把专业版变更为企业版，请查询套餐变更政策和办理条件。",
+        "status": "passed",
+        "runId": "run-1784550333455",
+        "runStatus": "completed",
+        "durationMs": 24667,
+        "assertions": [
+          {
+            "id": "run-status",
+            "label": "运行状态符合预期",
+            "passed": true,
+            "expected": "completed",
+            "actual": "completed",
+            "diagnosis": "评测要求 Agent run 结束为 completed，当前为 completed。"
+          },
+          {
+            "id": "required-tool-getTicket",
+            "label": "必须调用工具 getTicket",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getTicket。"
+          },
+          {
+            "id": "required-tool-getCustomer",
+            "label": "必须调用工具 getCustomer",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getCustomer。"
+          },
+          {
+            "id": "required-tool-getOrder",
+            "label": "必须调用工具 getOrder",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 getOrder。"
+          },
+          {
+            "id": "required-tool-searchPolicy",
+            "label": "必须调用工具 searchPolicy",
+            "passed": true,
+            "expected": "called",
+            "actual": "called",
+            "diagnosis": "trace 中已出现 searchPolicy。"
+          },
+          {
+            "id": "forbidden-tool-createRefund",
+            "label": "不得调用工具 createRefund",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 createRefund。"
+          },
+          {
+            "id": "forbidden-tool-updateTicketStatus",
+            "label": "不得调用工具 updateTicketStatus",
+            "passed": true,
+            "expected": "not-called",
+            "actual": "not-called",
+            "diagnosis": "trace 中未出现 updateTicketStatus。"
+          },
+          {
+            "id": "approval",
+            "label": "审批行为符合预期",
+            "passed": true,
+            "expected": "not-required",
+            "actual": "not-required",
+            "diagnosis": "该 case 不应出现人工审批，避免普通任务被误判为高风险。"
+          },
+          {
+            "id": "policy-citation",
+            "label": "政策检索包含可追溯引用",
+            "passed": true,
+            "expected": "present",
+            "actual": "present",
+            "diagnosis": "searchPolicy 应返回 Document、Node、文件和版本引用，禁止仅凭模型常识下结论。"
+          },
+          {
+            "id": "outcome-decision",
+            "label": "结构化业务结论符合预期",
+            "passed": true,
+            "expected": "read_only",
+            "actual": "read_only",
+            "diagnosis": "评测根据可信工具轨迹要求 outcome.decision 为 read_only，当前为 read_only。"
+          },
+          {
+            "id": "total-refund-count",
+            "label": "全局退款记录数符合预期",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "整个沙箱应保留 0 条退款记录，当前为 0 条。"
+          },
+          {
+            "id": "no-mock-fallback",
+            "label": "评测过程中未触发 Mock 降级",
+            "passed": true,
+            "expected": "0",
+            "actual": "0",
+            "diagnosis": "本 case 有 0 次模型调用降级为 Mock，不能作为真实模型通过结果。"
+          }
+        ],
+        "failedAssertionCount": 0,
+        "toolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "executedToolNames": [
+          "getTicket",
+          "getCustomer",
+          "getOrder",
+          "searchPolicy"
+        ],
+        "toolCallCount": 4,
+        "tokenUsage": {
+          "promptTokens": 10703,
+          "completionTokens": 1791,
+          "totalTokens": 12494
+        },
+        "modelNames": [
+          "deepseek-v4-flash"
+        ],
+        "approvalRequired": false,
+        "outcomeDecision": "read_only",
+        "regressionStatus": "new"
+      }
+    ],
+    "completedAt": "2026-07-20T12:25:58.151Z"
+  }
+}
