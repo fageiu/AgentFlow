@@ -133,7 +133,7 @@ class RagSettings(BaseSettings):
 |--------|--------|------|
 | `embedding_model` | `BAAI/bge-m3` | 向量模型，1024 维 |
 | `reranker_model` | `BAAI/bge-reranker-v2-m3` | 重排序模型 |
-| `lexical_mode` | `"pg_fts"` | 词法检索模式：`pg_fts`（PostgreSQL 全文搜索）或 `bm25`（内存 BM25） |
+| `lexical_mode` | `"bm25"` | 词法检索模式：`bm25`（内存 BM25，默认）或 `postgres`（PostgreSQL 全文搜索基线） |
 | `chunk_size` | 512 | 文档分块大小（字符数） |
 | `chunk_overlap` | 80 | 分块重叠字符数 |
 | `vector_top_k` | 20 | 向量检索候选数 |
@@ -426,8 +426,10 @@ class LlamaIndexVectorSource:
 ```python
 class PostgresLexicalSource:
     async def retrieve(self, query, top_k, *, include_archived=False):
-        tokens = " ".join(jieba.cut_for_search(query))   # 中文分词："退款审批" → "退款 审批"
-        ts_query = func.plainto_tsquery("simple", tokens) # 解析为 tsquery
+        # 中文分词后使用 OR 组合，避免长句按全词 AND 查询造成零召回。
+        ts_query = func.websearch_to_tsquery(
+            "simple", build_lexical_websearch_query(query)
+        )
         rank = func.ts_rank_cd(
             func.to_tsvector("simple", KnowledgeLexicalNodeModel.lexical_tokens),
             ts_query
@@ -444,9 +446,9 @@ class PostgresLexicalSource:
 
 **优点**：
 - 使用 PostgreSQL 内置全文搜索 → 无需额外微服务
-- GIN 索引 → 性能好，23 篇文档轻松应对
-- `plainto_tsquery` → 自动处理分词和停用词
-- `ts_rank_cd` → 覆盖密度排序，BM25 风格的排序算法
+- GIN 索引 → 适合作为数据库内词法检索基线
+- `websearch_to_tsquery` + OR 分词表达式 → 降低中文长句全词匹配导致的零召回风险
+- `ts_rank_cd` → 使用覆盖密度对命中结果排序
 
 **中文处理**：jieba 分好的词存入 `lexical_tokens`，PG 用 `simple` 词典（不做额外词形变化）直接匹配。
 
@@ -580,25 +582,29 @@ class LlamaIndexBM25Source:
 
 ### 9.3 BM25 vs PostgreSQL tsvector
 
-| 对比维度 | PostgreSQL tsvector（默认） | BM25（LlamaIndex） |
-|----------|---------------------------|-------------------|
+| 对比维度 | PostgreSQL tsvector（基线/回滚） | BM25（LlamaIndex，默认） |
+|----------|---------------------------------|--------------------------|
 | **存储位置** | 数据库 `lexical_tokens` 列 | 内存中构建倒排索引 |
 | **启动加载** | 无需加载，SQL 直接查询 | 需从 DB 读取所有文档构建索引 |
-| **实时性** | 写入即查 | 需显式 `refresh()` 更新索引 |
+| **实时性** | 事务提交后直接查询 | 文档变更成功后原子 `refresh()` 快照 |
 | **文档量大时** | 稳定，GIN 索引性能好 | 全量在内存，受内存限制 |
 | **依赖** | PostgreSQL 内置 | jieba + LlamaIndex |
 | **与 TypeScript 端匹配度** | vector_score + lexical_score 双列 | 同一分数字段 |
 
-**默认选择**：`lexical_mode=pg_fts`（PostgreSQL 全文搜索），因为：
-- 不需要启动时加载索引，启动更快
-- 写入后立即可查，无需 `refresh()`
-- 对于 23 篇文档规模，PG tsvector 已经足够
+**默认选择**：`lexical_mode=bm25`。当前政策语料规模适中，内存索引和刷新成本可控；
+在现有 50 条 Golden Query 的 Fast/CPU 热态评测中，BM25 混合检索达到 Recall@5 100%、
+MRR 0.841、无答案拒答准确率 100%，因此作为已经通过验收的默认实现。
 
-### 9.4 BM25 模式的使用场景
+`lexical_mode=postgres` 保留为同语料 A/B 基线和故障回滚路径。它不依赖进程内快照，
+在多副本、高频文档更新或语料显著增长时具有更简单的数据一致性与运维边界；在没有
+同版本、同语料直接对照评测前，不将两种方案的算法优劣写成确定结论。
 
-- **纯内存部署**：不依赖 PostgreSQL 的 `tsvector` 能力
-- **文档量适中**：可全部加载到内存，检索速度更快
-- **需要精细调参**：BM25 的 `k1`、`b` 参数可细调词法匹配灵敏度
+### 9.4 两种模式的使用边界
+
+- **优先 BM25**：单 RAG 服务或副本较少、文档量适中、政策编号和专业术语精确匹配重要
+- **考虑 PostgreSQL**：多副本、高频更新、内存快照成本升高，或需要数据库作为唯一实时索引来源
+- **切换原则**：固定语料、阈值和 50 条查询，对比 Recall@5、MRR、拒答准确率、P95、错误数与更新一致性
+- **保留回滚**：默认模式切换不删除 `PostgresLexicalSource`，确保 BM25 初始化或刷新异常时可快速恢复
 
 ### 9.5 BM25 模式的索引更新时机
 
@@ -912,7 +918,7 @@ POST /v1/search
 
 **答**：
 
-> "ES 是非常优秀的检索引擎，但对我们当前场景来说太重了。我们只有 23 篇政策文档，几万个 Node。PostgreSQL 内置的 tsvector + GIN 索引完全能胜任，而且省去了维护 ES 集群的运维成本。另外我们已经用了 PostgreSQL 做文档元数据存储和 pgvector，再加 ES 就是第三个数据存储了，数据同步和一致性会带来额外复杂度。当然，如果文档量膨胀到百万级，或者需要更复杂的分词器、同义词扩展、学习排名等能力，ES 会是必要的升级方向——配置里已经预留了 `lexical_mode` 参数，切换到 BM25 模式就是往 ES 方向演进的第一步。"
+> "ES 是非常优秀的检索引擎，但对当前政策语料规模来说太重了。项目已经使用 PostgreSQL 保存文档元数据和 pgvector，再增加 ES 会引入第三套存储及额外的数据同步成本。目前默认采用进程内 BM25，并保留 PostgreSQL tsvector 作为 A/B 和回滚路径；现有 50 条 Golden Query 已达到 Recall@5 100%、MRR 0.841。等语料增长到需要跨副本共享倒排索引，或者需要复杂分词、同义词扩展、字段权重和学习排序时，再评估 ES/OpenSearch。"
 
 ### Q5: BM25 和 PostgreSQL tsvector 在实现上有什么区别？
 
@@ -920,7 +926,7 @@ POST /v1/search
 
 **答**：
 
-> "我们通过 `lexical_mode` 配置支持两种词法检索。默认的 `pg_fts` 模式把 jieba 分词后的文本存到 `knowledge_lexical_nodes.lexical_tokens` 列，检索时用 PostgreSQL 的 `to_tsvector` + `plainto_tsquery` + `ts_rank_cd` 做全文搜索，GIN 索引加速。BM25 模式则由 LlamaIndex 的 `BM25Retriever` 在内存中构建倒排索引，检索时先用 jieba 对查询分词再匹配。两者的主要区别：pg_fts 不需要预先加载索引（SQL 直接查），数据写入后立刻可用；BM25 需要在启动时或文档变更后显式 `refresh()` 构建倒排索引，但 BM25 的排序效果在某些场景下略好。目前默认 pg_fts，因为对 23 篇文档来说性能差异不显著，而且省去了刷新索引的步骤。"
+> "我们通过 `lexical_mode` 配置支持两种词法检索。默认的 `bm25` 模式由 LlamaIndex `BM25Retriever` 在内存中构建倒排索引，查询和正文统一使用 jieba 分词；服务启动或文档变更成功后通过 `refresh()` 构建新索引，再原子替换有效版本与历史版本快照。`postgres` 模式把预分词文本保存到 `knowledge_lexical_nodes.lexical_tokens`，查询时使用 PostgreSQL `to_tsvector`、`websearch_to_tsquery` 和 `ts_rank_cd`，由 GIN 索引加速。BM25 已通过当前 50 条检索评测，因此作为默认；PostgreSQL 不依赖进程内快照，继续作为 A/B 基线和故障回滚路径。"
 
 ### Q6: 索引的幂等性怎么保证？
 
@@ -970,13 +976,13 @@ POST /v1/search
 
 > "有三层。第一，管理 API 使用 `X-Admin-Token` 认证，用 `secrets.compare_digest` 做字符串比较防时序攻击。第二，文件上传做了白名单校验——只允许 `.md` 和 `.pdf`，限制文件大小（默认 10MB），文件名用 UUID 重命名防止路径穿越。第三，Prompt 注入的防御不在 RAG 层——我们遵循的核心原则是安全边界在服务端代码不在 Prompt 中。RAG 的职责是忠实地返回检索结果，不做任何提取或过滤；Agent Executor 层才负责限制 LLM 对检索结果的滥用（如不能根据检索结果随意执行高风险操作）。"
 
-### Q12: 从 Agent 的角度看，RAG 检索的全文搜索（FTS）比 BM25 更适合你们？
+### Q12: 从 Agent 的角度看，为什么当前默认 BM25，同时保留 PostgreSQL FTS？
 
 **考察点**：对混合检索中词法引擎选型的理解。
 
 **答**：
 
-> "FTS 和 BM25 在数学上是等价的——PostgreSQL 的 `ts_rank_cd` 是基于 BM25 变体的覆盖密度算法，本身非常接近 BM25。本质区别在于工程实现：FTS 是数据库内置能力，不需要额外构建倒排索引，文档写进去就能查；BM25 需要在内存或独立索引中维护倒排表。选 FTS 是因为当前项目阶段优先减少启动阶段的依赖和复杂度。等文档量增长到十万级、需要更精细的词法调参（比如按 policy 做字段加权）时，切换到 BM25 的代价也不大——因为词法检索源已经抽象为 `AsyncCandidateSource` 协议，只需要替换 `lexical_source` 的实例即可。"
+> "BM25 和 PostgreSQL FTS 都属于词法检索，但评分公式并不等价：BM25显式考虑词频饱和与文档长度，`ts_rank_cd` 采用 PostgreSQL 的覆盖密度排序。当前语料规模允许把倒排索引放在内存中，而且 BM25 混合检索已经通过 50 条 Golden Query 的质量与延迟门禁，所以默认选 BM25。PostgreSQL FTS 的优势是数据库内统一查询，不需要每个服务副本维护快照，因此保留为 A/B、故障回滚，以及未来多副本或高频更新场景的候选。两者统一实现 `AsyncCandidateSource`，切换不会改变上层 RRF 和结果契约。"
 
 ---
 
@@ -986,8 +992,8 @@ POST /v1/search
 
 > **AgentFlow 企业政策 RAG 知识服务** | Python, FastAPI, PostgreSQL/pgvector, LlamaIndex, bge-m3
 >
-> - 设计并实现**四阶段混合检索流水线**（向量检索 + 中文词法检索 + RRF 融合 + Cross-encoder 重排），在 23 篇政策文档上达成 Recall@5 ≥ 0.95、MRR ≥ 0.85、P95 ≤ 2s 的检索质量
-> - 基于 PostgreSQL tsvector + jieba 实现**中文 BM25 词法检索**，支持 `lexical_mode` 一键切换到 LlamaIndex BM25，无需额外 ES 集群
+> - 设计并实现**四阶段混合检索流水线**（向量检索 + 中文词法检索 + RRF 融合 + Cross-encoder 重排）；当前 50 条 Golden Query 的 Fast/CPU 热态评测达到 Recall@5 100%、MRR 0.841、无答案拒答准确率 100%
+> - 默认使用 jieba + LlamaIndex BM25 完成词法召回，并保留 PostgreSQL tsvector 作为 A/B 基线和故障回滚路径，无需额外维护 ES 集群
 > - 设计**幂等索引管线**：checksum 对比避免重复 embedding，稳定 Node ID 保证向量库数据一致性，异常时自动回滚半写入数据
 > - 实现**严格的分级错误模型**（4 种 KnowledgeError），错误码与 TypeScript 端一一映射，空检索结果抛 404 而非空列表，从源头防止 LLM 幻觉
 > - 搭建 **Golden Query 评测系统**，6 项检索质量指标（recall@5、MRR、P95 延迟等）支持自动化门禁验收
@@ -1002,9 +1008,9 @@ POST /v1/search
 >
 > **核心贡献：**
 >
-> 1. **混合检索流水线**：设计并实现了向量检索（bge-m3 → PGVectorStore Top-20）+ 中文词法检索（jieba 分词 → PostgreSQL ts_rank_cd Top-20）+ RRF 融合 + bge-reranker-v2-m3 cross-encoder 重排序的四阶段流水线。keyword_hint 在 RRF 阶段做+0.05弱信号加分，不参与硬过滤。低于 0.35 阈值的结果抛 404 阻止 LLM 无依据生成。
+> 1. **混合检索流水线**：设计并实现了向量检索（bge-m3 → PGVectorStore Top-20）+ 中文词法检索（jieba + LlamaIndex BM25 Top-20）+ RRF 融合 + bge-reranker-v2-m3 cross-encoder 重排序的四阶段流水线。PostgreSQL tsvector 可作为可切换基线；keyword_hint 在 RRF 阶段作为弱信号加分，不参与硬过滤。
 >
-> 2. **双模式词法检索**：默认使用 PostgreSQL 内置全文搜索（`to_tsvector` + `plainto_tsquery` + GIN 索引），通过 `lexical_mode` 配置可一键切换到 LlamaIndex BM25（内存倒排索引），两个词法源统一实现 `AsyncCandidateSource` 协议。
+> 2. **双模式词法检索**：默认使用 LlamaIndex BM25（内存倒排索引），通过 `lexical_mode=postgres` 可切换到 PostgreSQL 全文搜索（`to_tsvector` + `websearch_to_tsquery` + GIN 索引），两个词法源统一实现 `AsyncCandidateSource` 协议。
 >
 > 3. **幂等索引管线**：`(policy_id, version)` + checksum 双重幂等检测，SHA256 稳定 Node ID 防重复，`is_current` 字段由 SQL 自动选择最新生效版本，索引异常时自动回滚向量和词法写入。
 >

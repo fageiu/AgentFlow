@@ -10,11 +10,11 @@ AgentFlow 是一个面向企业流程自动化的 AI Agent Runtime 与 Evaluatio
 - **统一 Tool Registry**：集中维护工具描述、风险等级、Zod 入参校验、JSON Schema 与执行入口，让模型工具定义和服务端校验保持一致。
 - **Human-in-the-loop**：`riskLevel: "high"` 的退款工具必须等待人工批准；拒绝后不创建退款，也不继续更新工单状态。
 - **可观测与可恢复**：通过 SSE 展示执行时间线，持久化 AgentRun、会话和审批快照，并将服务重启时无法继续的任务降级为可重试中断状态。
-- **确定性 Agent 评测**：内置 28 条 golden task（含 10 条 RAG 专项），同时断言最终回答、Citation、工具轨迹与业务副作用。
+- **确定性 Agent 评测**：内置 28 条 Golden Task（含 10 条 RAG 专项），同时断言最终回答、Citation、工具轨迹与业务副作用；当前 DeepSeek 真实模型与 Mock CI 全量回归均为 28/28。
 - **结构化业务 Outcome**：服务端根据真实工具轨迹和审批决议派生 `decision`、实际写入动作与证据引用，自然语言措辞变化不再影响核心业务判定。
-- **业务语义约束**：单工单任务会预读取真实上下文，规则检索依据工单标题和描述归一到退款、审批、发票、SLA、升级、取消、重复退款或安全规则，降低模型误选工具和关键词的概率。
+- **业务语义约束**：单工单任务会预读取真实上下文，规则检索依据工单标题和描述归一到退款、审批、发票、SLA、升级、取消、重复退款或安全规则；Planner 输出发生格式波动时，仅在已有可信单工单上下文的前提下回退到固定只读核查计划，不扩大写权限。
 - **模型层解耦**：统一封装 OpenAI-compatible Provider，支持兼容模型切换和 Mock fallback，便于本地演示与稳定回归。
-- **企业政策 RAG**：独立 FastAPI + LlamaIndex 服务使用 BGE-M3、BM25、BGE Reranker 与 pgvector，`searchPolicy` 返回 Top-K、分阶段得分和可验证 Citation。
+- **企业政策 RAG**：独立 FastAPI + LlamaIndex 服务使用 BGE-M3、BM25、BGE Reranker 与 pgvector，`searchPolicy` 返回 Top-K、分阶段得分和可验证 Citation；当前 50 条 Golden Query 的 Fast/CPU 热态评测达到 Recall@5 100%、MRR 0.841、无答案拒答准确率 100%，P95 为 1.353 秒。
 
 完整设计见 [Agent 执行架构](docs/architecture.md)。
 
@@ -232,13 +232,19 @@ CI 不读取真实模型密钥，也不会产生模型 API 费用。真实模型
 
 ### 当前已保存的评测基线
 
-| 报告 | 模式 | 结果 | 说明 |
-|---|---|---:|---|
-| [Mock 全量基线](docs/evaluation-results/mock-full.md) | Mock | 18/18 | 历史 18 条基线；当前 CI 已扩展为 28 条 |
-| [DeepSeek Outcome 全量评测](docs/evaluation-results/deepseek-post-outcome-full.md) | 真实模型 | 17/18 | 17 条通过、1 条因 Planner step 校验失败而异常 |
-| [Planner 稳健性定向复测](docs/evaluation-results/deepseek-planner-robustness-targeted.md) | 真实模型 | 1/1 | 上述幂等性失败路径定向复测通过 |
+2026-07-20 使用 `deepseek-v4-flash`、`default-tool-calling-v2` 和当前 28 条 Golden Task 完成了新一轮真实模型回归。真实模式强制关闭 Mock fallback；本轮结果不包含任何 Mock 降级成绩。
 
-真实模型全量报告的通过率为 94.4%，共消耗 185,322 Token；随后通过的单 Case 定向复测只证明对应失败路径已恢复，不等同于重新完成全量 18/18 回归。报告记录的是特定模型、Prompt 和代码版本下的实验结果，不能视为对后续版本的永久保证。
+| 评测 | 模式 | 结果 | 关键指标或说明 |
+|---|---|---:|---|
+| Agent Mock CI | Mock | 28/28 | 0 失败、0 异常；用于验证确定性执行和评分基线 |
+| DeepSeek 首轮全量 | 真实模型 | 26/28 | 92.9%；2 条知识检索用例因 Planner 空计划或合同格式异常而失败 |
+| Planner 修复定向复测 | 真实模型 | 2/2 | 可信单工单上下文下安全回退到固定只读核查计划 |
+| DeepSeek 修复后全量 | 真实模型 | 28/28 | 100%；0 失败、0 异常，共消耗 367,966 Token |
+| RAG Fast/CPU 热态评测 | 真实检索 | 50 条 | Recall@5 100%、MRR 0.841、拒答准确率 100%、P95 1.353 秒、0 异常 |
+
+真实回归还暴露并修复了集合查询的展示完整性问题：即使模型只总结“返回 N 条”，服务端仍保留 `listTickets` / `searchTickets` 可信结果中的工单号、状态、优先级和客户字段。Planner 格式失败的回退仅补齐 `getCustomer → getOrder → searchPolicy` 三个只读步骤，写入动作仍必须经过 Action Planner、Tool Registry 与人工审批。
+
+本次本地报告位于 `.agentflow-artifacts/deepseek-full-fixed-2026-07-20.md`、`.agentflow-artifacts/mock-evaluation.md` 和 `.agentflow-artifacts/rag-evaluation-2026-07-20-warm.json`。该目录按项目约定不提交 Git；报告记录的是特定模型、Prompt、检索配置和代码版本下的实验结果，不能视为对后续版本的永久保证。
 
 ## Docker Compose 一键运行
 
