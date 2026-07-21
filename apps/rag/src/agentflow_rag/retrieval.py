@@ -114,6 +114,7 @@ class PostgresLexicalSource:
             document_filters.extend(
                 [KnowledgeDocumentModel.status == "active", KnowledgeDocumentModel.is_current.is_(True)]
             )
+        # 召回排序
         rank = func.ts_rank_cd(
             func.to_tsvector("simple", KnowledgeLexicalNodeModel.lexical_tokens), ts_query
         ).label("rank")
