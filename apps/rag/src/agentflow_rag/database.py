@@ -41,7 +41,7 @@ class KnowledgeDocumentModel(Base):
 
 
 class KnowledgeLexicalNodeModel(Base):
-    """中文词法索引表"""
+    """中文词法索引表, 一个node一条记录"""
     __tablename__ = "knowledge_lexical_nodes"
 
     node_id: Mapped[str] = mapped_column(String(64), primary_key=True)
