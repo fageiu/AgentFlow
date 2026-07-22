@@ -108,6 +108,23 @@ export class ToolNotAvailableError extends AgentTypedError {
   }
 }
 
+/** 模型调用了已注册但不属于当前计划步骤的工具，允许 Executor 引导其回到授权工具。 */
+export class ToolNotAuthorizedError extends AgentTypedError {
+  constructor(toolName: string, expectedTools: string[], planStepId: string) {
+    super({
+      code: "TOOL_NOT_AUTHORIZED",
+      category: "tool",
+      message: `Tool is not authorized for plan step ${planStepId}: ${toolName}`,
+      userMessage: "模型请求的工具不在当前计划步骤授权范围内，系统已阻止执行。",
+      detailMessage: `当前步骤 ${planStepId} 仅允许调用 ${expectedTools.join(", ")}，但模型请求了 ${toolName}。`,
+      suggestion: "请按当前计划步骤选择已授权工具。",
+      retryable: false,
+      details: { toolName, expectedTools, planStepId },
+    });
+    this.name = "ToolNotAuthorizedError";
+  }
+}
+
 export class LlmProviderError extends AgentTypedError {
   constructor(message: string, details: Record<string, unknown> = {}, options?: { cause?: unknown; retryable?: boolean }) {
     super({
@@ -350,7 +367,8 @@ export function getAgentErrorHttpStatus(error: AgentErrorInfo) {
   if (error.code === "BUSINESS_DATA_NOT_FOUND" || error.code === "KNOWLEDGE_NO_MATCH") {
     return 404;
   }
-  if (error.code === "TOOL_INPUT_VALIDATION_ERROR" || error.code === "TOOL_NOT_AVAILABLE" || error.code === "KNOWLEDGE_DOCUMENT_INVALID") {
+  if (error.code === "TOOL_INPUT_VALIDATION_ERROR" || error.code === "TOOL_NOT_AVAILABLE"
+    || error.code === "TOOL_NOT_AUTHORIZED" || error.code === "KNOWLEDGE_DOCUMENT_INVALID") {
     return 422;
   }
   if (error.code === "KNOWLEDGE_SERVICE_UNAVAILABLE" || error.code === "KNOWLEDGE_INDEX_NOT_READY") {

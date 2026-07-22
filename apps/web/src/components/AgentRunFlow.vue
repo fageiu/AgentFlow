@@ -4,7 +4,12 @@ import type { AgentPlanStep, AgentRun, AgentStep } from "@agentflow/shared";
 import AgentStepDetail from "./AgentStepDetail.vue";
 import PolicyRetrievalDetail from "./PolicyRetrievalDetail.vue";
 import { buildStepErrorSummary } from "../utils/errors";
-import { buildCompactTraceItems, getStepPlan, parseStepDetail } from "../utils/trace";
+import {
+  buildCompactTraceItems,
+  getStepPlan,
+  isPlanningTicketContextStep,
+  parseStepDetail,
+} from "../utils/trace";
 
 type PlanProgressStatus = "completed" | "failed" | "rejected" | "skipped" | "cancelled" | "approval" | "running" | "current" | "pending";
 
@@ -148,7 +153,7 @@ const visibleSteps = computed(() => {
     }
 
     const step = item.step;
-    if (step.title === "读取工单上下文（用于制定计划）") {
+    if (isPlanningTicketContextStep(step)) {
       return [];
     }
     if (step.toolName && plannedTools.has(step.toolName)) {
@@ -160,7 +165,7 @@ const visibleSteps = computed(() => {
 
 /** Planner 前的工单预读取不属于计划本身，但必须按真实时间顺序显示在方案卡片之前。 */
 const planningContextSteps = computed(() => compactItems.value.flatMap((item) =>
-  item.kind === "step" && item.step.title === "读取工单上下文（用于制定计划）"
+  item.kind === "step" && isPlanningTicketContextStep(item.step)
     ? [item.step]
     : [],
 ));
@@ -241,7 +246,7 @@ const streamingActivity = computed(() => {
 
   // 单工单任务会先读取上下文再调用 Planner；计划返回前不能误显示为“执行下一步”。
   if (planProgress.value.items.length === 0) {
-    return lastStep.title === "读取工单上下文（用于制定计划）"
+    return isPlanningTicketContextStep(lastStep)
       ? "正在根据工单上下文制定处理方案"
       : "正在制定处理方案";
   }

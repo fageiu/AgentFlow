@@ -313,10 +313,15 @@ export function listAgentTools(): LlmToolDefinition[] {
   });
 }
 
+/** 仅校验并归一工具参数，不触发业务副作用；高风险工具在创建审批前复用此入口。 */
+export function validateToolInput(name: ToolName, input: unknown) {
+  return toolRegistry[name].inputSchema.parse(input);
+}
+
 /** 统一执行工具：先用 schema 校验入参，再调用具体业务函数。 */
 export async function runTool(name: ToolName, input: unknown, context?: RagRequestContext) {
   const tool = toolRegistry[name];
-  const parsedInput = tool.inputSchema.parse(input);
+  const parsedInput = validateToolInput(name, input);
   const output = await tool.execute(parsedInput, context);
 
   return {
