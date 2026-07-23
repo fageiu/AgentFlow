@@ -32,7 +32,6 @@
 
 > “企业工单 Agent 执行与评测平台，是一个 AI Agent 运行时和评测平台。核心架构是 Planner-Executor-Replanner：Planner 先生成计划，每步只授权一个工具；Executor 严格按计划执行，高风险操作走人工审批；工具失败时 Replanner 只重规划未完成步骤。服务端还会根据真实工具轨迹派生结构化 Outcome，不信任模型自报成功。28 条 golden task 用确定性规则检查工具轨迹、审批和业务副作用；真实模型仍可能漂移，所以模型或 Prompt 变更后必须重新回归。技术栈是 Fastify + FastAPI、Vue 3 和 TypeScript + Python。”
 
-### 项目量级（应对"项目规模"类问题）
 
 ### 项目量级（应对"项目规模"类问题）
 
@@ -639,7 +638,7 @@ test_top_k_truncation()                   # Top-K 截断
 
 | 环节 | 内容 |
 |------|------|
-| **Situation** | 需要构建一个企业级 AI Agent 来处理工单和退款。但现有框架（LangChain）让模型自由选择工具，无法控制调用顺序和授权范围。项目经理反馈之前 PoC 中出现了模型跳过客资核查直接执行退款的问题。 |
+| **Situation** | 需要构建一个企业级 AI Agent 来处理工单和退款。但现有框架（LangChain）让模型自由选择工具，无法控制调用顺序和授权范围。 |
 | **Task** | 设计一套能精确控制工具调用、支持分步授权、防止模型越权或跳步的 Agent 执行架构。 |
 | **Action** | 我设计并实现了 Planner-Executor-Replanner 三层架构。关键设计决策：1）Planner 输出的每个计划步骤只授权一项工具，模型没有选择空间；2）Executor 每步严格校验模型调用是否在授权范围内，不在就抛错；3）设计了完整的计划校验逻辑（parseAgentPlan），version、steps 数量、工具名、步骤 ID 全部校验；4）工具失败时 Replanner 只重规划未完成步骤，不会重复已完成的工作；5）Action Planner 在只读核查完成后才决策是否追加写入动作，且必须基于已执行的真实业务证据。 |
 | **Result** | 系统向模型暴露 8 种业务工具，并保留 2 个演示控制工具；越权调用会被 Executor 拒绝并记录失败 Trace。核心执行器约 1,400 行 TypeScript。这里不声称模型越权概率为零，只说明服务端不会放行已识别的越权调用。 |
