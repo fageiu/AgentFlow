@@ -19,6 +19,7 @@ import {
   AgentExecutionError,
   AgentLoopLimitError,
   ToolNotAvailableError,
+  ToolNotAuthorizedError,
   createAgentErrorEvent,
   formatAgentErrorDetail,
   normalizeAgentError,
@@ -33,7 +34,14 @@ import {
 } from "../llm/prompts.js";
 import type { LlmChatMessage, LlmToolCall } from "../llm/types.js";
 import { saveRun } from "../trace/runStore.js";
-import { isAgentToolName, listAgentTools, runTool, toolRegistry, type ToolName } from "../tools/toolRegistry.js";
+import {
+  isAgentToolName,
+  listAgentTools,
+  runTool,
+  toolRegistry,
+  validateToolInput,
+  type ToolName,
+} from "../tools/toolRegistry.js";
 import {
   beginRefundWorkflowTransaction,
   commitRefundWorkflowTransaction,
@@ -60,8 +68,10 @@ const MAX_TOOL_RETRY_ATTEMPTS = 2;
 
 type ApprovalMode = "interactive" | "auto" | "auto-reject";
 
-interface ToolRetryDecision {
+export interface ToolRetryDecision {
   retryable: boolean;
+  strategy: "retry_same_tool" | "retry_planned_tool" | "fail";
+  recoveryToolName?: string;
   reason: string;
 }
 
@@ -265,11 +275,20 @@ function buildFailedToolStep(index: number, toolCall: LlmToolCall, error: unknow
   };
 }
 
-/** 判断工具失败是否值得交还给模型自我修正，避免对明确不存在的数据做无意义重试。 */
-function decideToolRetry(error: AgentErrorInfo, toolCall: LlmToolCall, attempts: number): ToolRetryDecision {
+/**
+ * 判断工具失败是否可由模型修正，并明确下一次必须执行的合法工具。
+ * 此处只负责模型级恢复；网络超时等临时故障由 Provider/RAG Client 自己完成有限重试。
+ */
+export function decideToolRetry(
+  error: AgentErrorInfo,
+  toolCall: LlmToolCall,
+  attempts: number,
+  plannedToolName?: string,
+): ToolRetryDecision {
   if (attempts >= MAX_TOOL_RETRY_ATTEMPTS) {
     return {
       retryable: false,
+      strategy: "fail",
       reason: `已达到最大重试次数 ${MAX_TOOL_RETRY_ATTEMPTS}。`,
     };
   }
@@ -277,26 +296,41 @@ function decideToolRetry(error: AgentErrorInfo, toolCall: LlmToolCall, attempts:
   if (error.code === "TOOL_INPUT_VALIDATION_ERROR") {
     return {
       retryable: true,
+      strategy: "retry_same_tool",
+      recoveryToolName: toolCall.name,
       reason: "工具参数校验失败，模型可根据校验错误修正参数后重试。",
     };
   }
 
-  if (error.code === "TOOL_NOT_AVAILABLE") {
+  if (error.code === "TOOL_NOT_AVAILABLE" || error.code === "TOOL_NOT_AUTHORIZED") {
+    if (!plannedToolName || !isAgentToolName(plannedToolName)) {
+      return {
+        retryable: false,
+        strategy: "fail",
+        reason: "当前计划没有可用于恢复的合法工具。",
+      };
+    }
     return {
       retryable: true,
-      reason: "模型选择了未开放工具，可重新选择工具注册表中的合法工具。",
+      strategy: "retry_planned_tool",
+      recoveryToolName: plannedToolName,
+      reason: `模型选择了未开放或未授权工具，下一次必须回到当前计划授权工具 ${plannedToolName}。`,
     };
   }
 
-  if (error.code === "BUSINESS_DATA_NOT_FOUND" && toolCall.name === "searchPolicy") {
+  if ((error.code === "BUSINESS_DATA_NOT_FOUND" || error.code === "KNOWLEDGE_NO_MATCH")
+    && toolCall.name === "searchPolicy") {
     return {
       retryable: true,
+      strategy: "retry_same_tool",
+      recoveryToolName: toolCall.name,
       reason: "规则关键词未命中，模型可根据任务语义换用更贴近规则库的关键词重试。",
     };
   }
 
   return {
     retryable: false,
+    strategy: "fail",
     reason: "该错误通常代表业务对象不存在或外部异常，本轮不自动重试。",
   };
 }
@@ -366,7 +400,9 @@ function buildRetryObservationStep(input: {
         retry: {
           attempt: input.retryAttempt,
           maxAttempts: MAX_TOOL_RETRY_ATTEMPTS,
-          toolName: input.toolCall.name,
+          failedToolName: input.toolCall.name,
+          recoveryToolName: input.decision.recoveryToolName,
+          strategy: input.decision.strategy,
           arguments: input.toolCall.arguments,
           reason: input.decision.reason,
           instruction: "已将结构化错误作为 tool message 回传给模型，请模型调整工具或参数后继续执行。",
@@ -1342,7 +1378,6 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
 
   const tools = listAgentTools();
   const messages = buildToolCallingMessages(run.task, ticketContext?.ticket);
-  const retryAttemptsByTool = new Map<string, number>();
   let pendingRecovery: PendingToolRecovery | undefined;
   let activePlanStepIndex = 0;
   let actionDecisionCompleted = !ticketContext;
@@ -1427,14 +1462,14 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
           }
 
           if (!activePlanStep.allowedTools.includes(toolCall.name)) {
-            throw new Error(
-              `Tool ${toolCall.name} is not authorized for current plan step ${activePlanStep.id}; expected ${activePlanStep.allowedTools.join(", ")}.`,
-            );
+            throw new ToolNotAuthorizedError(toolCall.name, activePlanStep.allowedTools, activePlanStep.id);
           }
 
           const tool = toolRegistry[toolCall.name];
           // 高风险工具调用需要人工审批，批准后才执行，拒绝时把拒绝结果回传给 LLM。
           if (tool.riskLevel === "high") {
+            // 先做无副作用校验，避免让用户审批一个执行时必然失败或包含多余字段的请求。
+            toolCall.arguments = validateToolInput(toolCall.name, toolCall.arguments) as Record<string, unknown>;
             const rejectedToolMessage = yield* requestApprovalForTool(run, stepIndex++, toolCall, mode);
 
             if (rejectedToolMessage) {
@@ -1477,8 +1512,15 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
           recordToolCall(run);
           const failedToolStep = buildFailedToolStep(stepIndex++, toolCall, error);
           const enrichedError = await enrichErrorWithLlmSummary(run, failedToolStep.agentError);
-          const nextRetryAttempt = (retryAttemptsByTool.get(toolCall.name) ?? 0) + 1;
-          const retryDecision = decideToolRetry(enrichedError, toolCall, nextRetryAttempt - 1);
+          // 同一恢复链连续计数；工具成功后 pendingRecovery 会清空，后续计划步骤获得独立额度。
+          const previousRetryAttempts = pendingRecovery?.retryAttempt ?? 0;
+          const nextRetryAttempt = previousRetryAttempts + 1;
+          const retryDecision = decideToolRetry(
+            enrichedError,
+            toolCall,
+            previousRetryAttempts,
+            activePlanStep?.allowedTools[0],
+          );
           const traceError = retryDecision.retryable
             ? {
                 ...enrichedError,
@@ -1486,6 +1528,8 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
                 details: {
                   ...enrichedError.details,
                   retryDecision: retryDecision.reason,
+                  retryStrategy: retryDecision.strategy,
+                  recoveryToolName: retryDecision.recoveryToolName,
                   nextRetryAttempt,
                 },
               }
@@ -1500,15 +1544,14 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
           yield addStep(run, failedToolStep.step);
 
           // 可重试 → 结构化错误回传 LLM → 重规划
-          if (retryDecision.retryable) {
-            retryAttemptsByTool.set(toolCall.name, nextRetryAttempt);
+          if (retryDecision.retryable && retryDecision.recoveryToolName) {
             // OpenAI-compatible 协议要求 assistant.tool_calls 后立即存在同 ID 的 tool message。
             messages.push(buildToolErrorMessage(toolCall, traceError, nextRetryAttempt));
             const completedPlanSteps = activePlan.steps.slice(0, activePlanStepIndex);
             const replanned = await buildReplanStep(
               run,
               completedPlanSteps,
-              toolCall.name,
+              retryDecision.recoveryToolName,
               traceError.detailMessage ?? traceError.message,
               stepIndex++,
               ticketContext?.ticket,
@@ -1528,7 +1571,7 @@ async function* buildAgentEvents(run: AgentRun, mode: ApprovalMode): AsyncGenera
             yield addStep(run, replanned.step);
             // 加锁：待恢复，工具调用失败需重试，不允许生成最终结论
             pendingRecovery = {
-              toolName: toolCall.name,
+              toolName: retryDecision.recoveryToolName,
               retryAttempt: nextRetryAttempt,
               promptAttempts: 0,
               error: traceError,

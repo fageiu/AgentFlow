@@ -117,6 +117,21 @@ export function getStepPlan(step: AgentStep) {
   return undefined;
 }
 
+const planningTicketContextTitles = new Set([
+  "读取工单上下文（用于制定计划）",
+  "读取工单详情（用于制定计划）",
+]);
+
+/**
+ * 通过稳定的 toolCallId 识别 Planner 前的工单预读取步骤，并兼容没有该字段的历史 trace。
+ * 避免前后端展示文案调整后，步骤被普通只读工具分组吞掉。
+ */
+export function isPlanningTicketContextStep(step: AgentStep) {
+  const detail = parseStepDetail(step.detail).data;
+  return step.type === "tool_call" && step.toolName === "getTicket"
+    && (detail?.toolCallId === "planning-ticket-context" || planningTicketContextTitles.has(step.title));
+}
+
 /**
  * 将 trace 转换成面向业务用户的紧凑记录：连续只读核查合并，计划与重规划单独呈现。
  * 原始 AgentStep 仍保留在详情里，避免牺牲审计信息。
@@ -141,7 +156,7 @@ export function buildCompactTraceItems(steps: AgentStep[]): CompactTraceItem[] {
     }
 
     if (step.type === "tool_call" && step.status === "completed" && step.toolName && readTools.has(step.toolName)
-      && step.title !== "读取工单上下文（用于制定计划）") {
+      && !isPlanningTicketContextStep(step)) {
       const groupedSteps: AgentStep[] = [step];
       index += 1;
 
@@ -191,7 +206,8 @@ export function getStepSummary(step: AgentStep) {
   if (isPlainObject(detail.data.retry)) {
     const retry = detail.data.retry;
     const attempt = retry.attempt ? `第 ${toCompactText(retry.attempt)} 次重试` : "准备重试";
-    const toolName = retry.toolName ? `工具 ${toCompactText(retry.toolName)}` : "当前工具";
+    const retryToolName = retry.recoveryToolName ?? retry.toolName ?? retry.failedToolName;
+    const toolName = retryToolName ? `工具 ${toCompactText(retryToolName)}` : "当前工具";
     const reason = retry.reason ? `原因 ${toCompactText(retry.reason)}` : "";
 
     return truncateText([attempt, toolName, reason].filter(Boolean).join(" · "));

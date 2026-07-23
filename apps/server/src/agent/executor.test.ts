@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { AgentPlan, AgentRun, AgentStep, EvaluationCase } from "@agentflow/shared";
+import type { AgentErrorInfo, AgentPlan, AgentRun, AgentStep, EvaluationCase } from "@agentflow/shared";
 
 test("非明确退款任务的 Action Planner 写入计划应归一化为空计划", async () => {
   const testDataDir = join(process.cwd(), ".agentflow-test-data");
@@ -160,6 +160,61 @@ test("Replanner Prompt 应明确要求首先重试失败工具", async () => {
   assert.ok(prompt.system.includes("[REPLANNER]"));
   assert.ok(prompt.system.includes("第一个工具必须是 searchPolicy"));
   assert.ok(prompt.user.includes("必须首先重试的工具：searchPolicy"));
+});
+
+test("工具恢复决策应区分同工具修正、回到授权工具和停止执行", async () => {
+  const { decideToolRetry } = await import("./executor.js");
+  const createError = (code: string, retryable = false): AgentErrorInfo => ({
+    code,
+    category: "tool",
+    message: code,
+    userMessage: code,
+    retryable,
+  });
+
+  const validation = decideToolRetry(
+    createError("TOOL_INPUT_VALIDATION_ERROR"),
+    { id: "call-validation", name: "createRefund", arguments: {} },
+    0,
+    "createRefund",
+  );
+  assert.equal(validation.strategy, "retry_same_tool");
+  assert.equal(validation.recoveryToolName, "createRefund");
+
+  const noMatch = decideToolRetry(
+    createError("KNOWLEDGE_NO_MATCH", true),
+    { id: "call-policy", name: "searchPolicy", arguments: { keyword: "unknown" } },
+    0,
+    "searchPolicy",
+  );
+  assert.equal(noMatch.strategy, "retry_same_tool");
+  assert.equal(noMatch.recoveryToolName, "searchPolicy");
+
+  const unavailable = decideToolRetry(
+    createError("TOOL_NOT_AVAILABLE"),
+    { id: "call-unknown", name: "unknownTool", arguments: {} },
+    0,
+    "getOrder",
+  );
+  assert.equal(unavailable.strategy, "retry_planned_tool");
+  assert.equal(unavailable.recoveryToolName, "getOrder");
+
+  const exhausted = decideToolRetry(
+    createError("TOOL_INPUT_VALIDATION_ERROR"),
+    { id: "call-exhausted", name: "createRefund", arguments: {} },
+    2,
+    "createRefund",
+  );
+  assert.equal(exhausted.retryable, false);
+  assert.equal(exhausted.strategy, "fail");
+
+  const serviceUnavailable = decideToolRetry(
+    createError("KNOWLEDGE_SERVICE_UNAVAILABLE", true),
+    { id: "call-service", name: "searchPolicy", arguments: { keyword: "refund" } },
+    0,
+    "searchPolicy",
+  );
+  assert.equal(serviceUnavailable.retryable, false, "服务故障不应消耗模型自我修正轮次");
 });
 
 test("规则检索应使用真实工单语义纠正模型的错误关键词", async () => {
@@ -1270,6 +1325,35 @@ test("工具参数缺失时应返回可诊断的校验错误", async () => {
   assert.equal(normalized.code, "TOOL_INPUT_VALIDATION_ERROR");
   assert.equal(normalized.category, "tool");
   assert.ok(Array.isArray(normalized.details?.issues));
+});
+
+test("高风险工具参数可在审批前完成无副作用校验和归一化", async () => {
+  const { validateToolInput } = await import("../tools/toolRegistry.js");
+  const { getSandboxState, resetSandboxState } = await import("../tools/sandboxTools.js");
+  resetSandboxState();
+  const before = structuredClone(getSandboxState());
+
+  const parsed = validateToolInput("createRefund", {
+    orderId: "O-7001",
+    amount: 6800,
+    reason: "审批前校验",
+    ignoredField: "不会进入审批或执行参数",
+  }) as Record<string, unknown>;
+
+  assert.deepEqual(parsed, {
+    orderId: "O-7001",
+    amount: 6800,
+    reason: "审批前校验",
+  });
+  assert.deepEqual(getSandboxState(), before, "参数校验不得创建退款或修改任何业务状态");
+  let validationFailed = false;
+  try {
+    validateToolInput("createRefund", { orderId: "O-7001" });
+  } catch {
+    validationFailed = true;
+  }
+  assert.equal(validationFailed, true, "缺少金额和原因的高风险请求必须在进入审批前失败");
+  assert.deepEqual(getSandboxState(), before);
 });
 
 test("持久化目录不可写时应进入降级并返回结构化错误", async () => {
