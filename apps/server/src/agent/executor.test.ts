@@ -244,6 +244,77 @@ test("规则检索应使用真实工单语义纠正模型的错误关键词", as
   assert.equal(duplicateRefundCall.arguments.keyword, "duplicate-refund");
 });
 
+test("合同升级工单应构造纯业务语义 Query，不得序列化工单追踪字段", async () => {
+  const { normalizeTaskAwareToolCall } = await import("./executor.js");
+  const normalized = normalizeTaskAwareToolCall(
+    "处理工单 T-1004",
+    {
+      id: "T-1004",
+      customerId: "C-9004",
+      orderId: "O-7004",
+      title: "合同升级咨询",
+      description: "VIP 客户希望从专业版升级到企业版，需要确认合同金额、升级规则和下一步流程。",
+      status: "open",
+      priority: "low",
+    },
+    {
+      id: "call-policy",
+      name: "searchPolicy",
+      arguments: {
+        keyword: "refund",
+        query: "处理工单T-1004\n{\"id\":\"T-1004\",\"customerId\":\"C-9004\"}",
+      },
+    },
+  );
+
+  assert.equal(normalized.arguments.keyword, "upgrade");
+  assert.ok(/专业版升级至企业版/.test(String(normalized.arguments.query)));
+  assert.ok(/合同版本升级管理政策/.test(String(normalized.arguments.query)));
+  assert.ok(/当前订单金额、合同期限/.test(String(normalized.arguments.query)));
+  assert.ok(!/T-1004|C-9004|customerId|priority|open/.test(String(normalized.arguments.query)));
+});
+
+test("续费折扣诉求优先于描述中附带的合同升级字样", async () => {
+  const { normalizeTaskAwareToolCall } = await import("./executor.js");
+  const normalized = normalizeTaskAwareToolCall(
+    "处理工单 T-1010",
+    {
+      id: "T-1010",
+      title: "续费折扣争议",
+      description: "VIP 客户认为续费折扣未按合同执行，要求核对订单和合同升级政策。",
+    },
+    {
+      id: "call-policy",
+      name: "searchPolicy",
+      arguments: { keyword: "upgrade" },
+    },
+  );
+
+  assert.equal(normalized.arguments.keyword, "renewal-discount");
+  assert.ok(/续费折扣/.test(String(normalized.arguments.query)));
+  assert.ok(!/T-1010/.test(String(normalized.arguments.query)));
+});
+
+test("模型提供明确自然语言政策问题时应保留其语义", async () => {
+  const { normalizeTaskAwareToolCall } = await import("./executor.js");
+  const providedQuery = "专业版升级企业版时，升级差额如何计算？";
+  const normalized = normalizeTaskAwareToolCall(
+    "处理工单 T-1004",
+    {
+      id: "T-1004",
+      title: "合同升级咨询",
+      description: "客户希望升级服务版本。",
+    },
+    {
+      id: "call-policy",
+      name: "searchPolicy",
+      arguments: { keyword: "upgrade", query: providedQuery },
+    },
+  );
+
+  assert.equal(normalized.arguments.query, providedQuery);
+});
+
 test("Action Planner 不得被 Top-K 次要政策或退款政策中的例外词误导", async () => {
   process.env.LLM_MOCK = "true";
 
@@ -741,7 +812,8 @@ test("SLA 查询任务的处理结果应展示真实规则命中内容", async (
         id: "P-sla-001",
         keyword: "sla",
         title: "SLA 服务不可用处理规则",
-        content: "服务不可用超过 60 分钟时，应升级给值班经理并评估补偿。",
+        content: "服务不可用超过 60 分钟时，应升级给值班经理并评估补偿。补偿金额必须结合合同约定。这里是不会进入最终结论的审计节点剩余正文。",
+        snippet: "服务不可用超过 60 分钟时，应升级给值班经理并评估补偿。",
       }),
     ],
   };
@@ -749,6 +821,7 @@ test("SLA 查询任务的处理结果应展示真实规则命中内容", async (
 
   assert.ok(outcome.conclusion?.result.includes("P-sla-001"));
   assert.ok(outcome.conclusion?.result.includes("服务不可用超过 60 分钟"));
+  assert.ok(!outcome.conclusion?.result.includes("审计节点剩余正文"));
   assert.ok(outcome.conclusion?.nextStep.includes("评估 SLA 影响范围"));
   assert.ok(!outcome.conclusion?.result.includes("P-refund-001"));
 });

@@ -32,6 +32,9 @@ const primaryMatch = computed(() => result.value?.matches[0]);
 const supportingMatches = computed(() => result.value?.matches.slice(1, 3) ?? []);
 const additionalMatches = computed(() => result.value?.matches.slice(3) ?? []);
 const rawOutput = computed(() => JSON.stringify(props.output, null, 2));
+const retrievalModeLabel = computed(() =>
+  result.value?.retrieval.rerankerApplied ? "Cross-encoder 重排" : "快速语义排序",
+);
 
 function percent(score: number | undefined) {
   return `${Math.round(Math.max(0, Math.min(1, score ?? 0)) * 100)}%`;
@@ -39,6 +42,21 @@ function percent(score: number | undefined) {
 
 function scoreLabel(score: number | undefined) {
   return score == null ? "—" : score.toFixed(3);
+}
+
+function rankingStageLabel(match: PolicyKnowledgeMatch) {
+  switch (match.rankingStage) {
+    case "reranker":
+      return "重排分";
+    case "fast_semantic":
+      return "语义主排";
+    case "fusion_coverage":
+      return "融合召回";
+    case "fixture":
+      return "Fixture";
+    default:
+      return "历史综合分";
+  }
 }
 
 function location(match: PolicyKnowledgeMatch) {
@@ -57,6 +75,7 @@ function location(match: PolicyKnowledgeMatch) {
         <strong>政策依据</strong>
       </div>
       <div class="policy-ledger-summary">
+        <span>{{ retrievalModeLabel }}</span>
         <span>{{ result.matches.length }} 条引用</span>
         <span>{{ result.retrieval.durationMs }} ms</span>
       </div>
@@ -69,7 +88,10 @@ function location(match: PolicyKnowledgeMatch) {
           <strong>{{ primaryMatch.title }}</strong>
           <span>{{ primaryMatch.policyId }} · v{{ primaryMatch.citation.version }}</span>
         </div>
-        <b>{{ scoreLabel(primaryMatch.score) }}</b>
+        <span class="policy-stage-score">
+          <small>{{ rankingStageLabel(primaryMatch) }}</small>
+          <b>{{ scoreLabel(primaryMatch.score) }}</b>
+        </span>
       </div>
       <div class="score-track" aria-hidden="true">
         <span :style="{ width: percent(primaryMatch.score) }"></span>
@@ -90,7 +112,10 @@ function location(match: PolicyKnowledgeMatch) {
           <div>
             <div class="policy-compact-title">
               <strong>{{ match.title }}</strong>
-              <b>{{ scoreLabel(match.score) }}</b>
+              <span class="policy-stage-score">
+                <small>{{ rankingStageLabel(match) }}</small>
+                <b>{{ scoreLabel(match.score) }}</b>
+              </span>
             </div>
             <p>{{ match.content }}</p>
             <footer>
@@ -111,7 +136,10 @@ function location(match: PolicyKnowledgeMatch) {
           <div>
             <div class="policy-compact-title">
               <strong>{{ match.title }}</strong>
-              <b>{{ scoreLabel(match.score) }}</b>
+              <span class="policy-stage-score">
+                <small>{{ rankingStageLabel(match) }}</small>
+                <b>{{ scoreLabel(match.score) }}</b>
+              </span>
             </div>
             <p>{{ match.content }}</p>
             <footer>
@@ -134,10 +162,11 @@ function location(match: PolicyKnowledgeMatch) {
       </dl>
       <div class="policy-score-table">
         <div class="policy-score-head">
-          <span>来源</span><span>Vector</span><span>Lexical</span><span>Fusion</span><span>Rerank</span>
+          <span>来源</span><span>排序阶段</span><span>Vector</span><span>Lexical</span><span>Fusion</span><span>Rerank</span>
         </div>
         <div v-for="(match, index) in result.matches" :key="match.citation.nodeId">
           <strong>#{{ index + 1 }} {{ match.title }}</strong>
+          <span>{{ rankingStageLabel(match) }}</span>
           <span>{{ scoreLabel(match.vectorScore) }}</span>
           <span>{{ scoreLabel(match.lexicalScore) }}</span>
           <span>{{ scoreLabel(match.fusionScore) }}</span>
@@ -193,8 +222,9 @@ function location(match: PolicyKnowledgeMatch) {
 .policy-primary-title > div { display: grid; gap: 2px; }
 .policy-primary-title strong { color: #173f34; font-size: 12px; }
 .policy-primary-title span { color: #688077; font-size: 8px; }
-.policy-primary-title b,
-.policy-compact-title b { color: #1f5d4d; font-family: Georgia, serif; font-size: 15px; }
+.policy-stage-score { display: grid; flex: 0 0 auto; justify-items: end; gap: 1px; }
+.policy-stage-score small { color: #6f877e; font-family: "Cascadia Code", Consolas, monospace; font-size: 7px; font-weight: 700; white-space: nowrap; }
+.policy-stage-score b { color: #1f5d4d; font-family: Georgia, serif; font-size: 15px; }
 .score-track { height: 2px; margin: 8px 0; overflow: hidden; background: #dfe9e3; }
 .score-track span { display: block; height: 100%; background: #37806c; }
 .policy-primary p { display: -webkit-box; margin: 0; overflow: hidden; color: #40564f; font-size: 10px; line-height: 1.7; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
@@ -209,7 +239,7 @@ function location(match: PolicyKnowledgeMatch) {
 .policy-more li:first-child { border-top: 0; }
 .policy-rank { padding-top: 1px; color: #88a098; font-family: Georgia, serif; font-size: 11px; }
 .policy-compact-title strong { color: #29483f; font-size: 10px; }
-.policy-compact-title b { font-size: 12px; }
+.policy-compact-title .policy-stage-score b { font-size: 12px; }
 .policy-supporting p,
 .policy-more p { display: -webkit-box; margin: 4px 0 0; overflow: hidden; color: #53665f; font-size: 9px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 
@@ -247,7 +277,7 @@ function location(match: PolicyKnowledgeMatch) {
 .retrieval-metrics dd { margin: 2px 0 0; color: #173f34; font-size: 14px; font-weight: 800; }
 
 .policy-score-table { padding: 8px 11px 10px; background: #f7faf8; }
-.policy-score-table > div { display: grid; grid-template-columns: minmax(150px, 1fr) repeat(4, 55px); gap: 6px; padding: 6px 4px; border-bottom: 1px solid #e1e9e4; color: #647a72; font-size: 8px; }
+.policy-score-table > div { display: grid; grid-template-columns: minmax(150px, 1fr) 70px repeat(4, 55px); gap: 6px; padding: 6px 4px; border-bottom: 1px solid #e1e9e4; color: #647a72; font-size: 8px; }
 .policy-score-table > div:last-child { border-bottom: 0; }
 .policy-score-table strong { overflow: hidden; color: #29483f; text-overflow: ellipsis; white-space: nowrap; }
 .policy-score-head { color: #789087 !important; font-weight: 800; text-transform: uppercase; }

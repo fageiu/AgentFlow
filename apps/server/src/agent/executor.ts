@@ -61,6 +61,7 @@ import {
   enrichOutcomeWithBusinessDecision,
   formatOutcomeConclusion,
 } from "./businessDecision.js";
+import { buildPolicySearchQuery } from "./policyQuery.js";
 
 const STEP_DELAY_MS = 250;
 const MAX_TOOL_LOOP_TURNS = 10;
@@ -850,7 +851,12 @@ export function normalizeTaskAwareToolCall(
     return toolCall;
   }
 
-  const evidence = `${task}\n${JSON.stringify(ticketContext ?? {})}`;
+  const ticketRecord = ticketContext && typeof ticketContext === "object" && !Array.isArray(ticketContext)
+    ? ticketContext as Record<string, unknown>
+    : {};
+  const title = typeof ticketRecord.title === "string" ? ticketRecord.title : "";
+  const description = typeof ticketRecord.description === "string" ? ticketRecord.description : "";
+  const evidence = `${task}\n${title}\n${description}`;
   let keyword: string | undefined;
   if (/重复.{0,6}退款|退款.{0,6}重复/i.test(evidence)) {
     keyword = "duplicate-refund";
@@ -858,6 +864,8 @@ export function normalizeTaskAwareToolCall(
     keyword = "security";
   } else if (/发票|开票/.test(evidence)) {
     keyword = "发票";
+  } else if (/续费|折扣/.test(evidence)) {
+    keyword = "renewal-discount";
   } else if (/升级/.test(evidence)) {
     keyword = "upgrade";
   } else if (/SLA|服务不可用|不可用/i.test(evidence)) {
@@ -870,9 +878,14 @@ export function normalizeTaskAwareToolCall(
     keyword = "refund";
   }
 
-  const query = typeof toolCall.arguments.query === "string" && toolCall.arguments.query.trim().length >= 2
-    ? toolCall.arguments.query.trim()
-    : evidence;
+  const resolvedKeyword = keyword
+    ?? (typeof toolCall.arguments.keyword === "string" ? toolCall.arguments.keyword : undefined);
+  const query = buildPolicySearchQuery({
+    task,
+    ticketContext,
+    providedQuery: toolCall.arguments.query,
+    keyword: resolvedKeyword,
+  });
 
   return {
     ...toolCall,

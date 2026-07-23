@@ -12,9 +12,24 @@ from agentflow_rag.retrieval import (
     RetrievalService,
     build_lexical_websearch_query,
     deduplicate_document_candidates,
+    extract_relevant_snippet,
     reciprocal_rank_fusion,
 )
 from agentflow_rag.schemas import SearchRequest
+
+
+def test_relevant_snippet_removes_headings_and_selects_query_sentence() -> None:
+    content = """# 企业服务政策
+
+## 响应口径
+
+企业版首次响应目标为三十分钟。首次响应不等于故障恢复时间。
+"""
+
+    snippet = extract_relevant_snippet("企业版首次响应多久", content)
+
+    assert snippet == "企业版首次响应目标为三十分钟。"
+    assert "#" not in snippet
 
 
 def candidate(node_id: str, policy_id: str, keyword: str, score: float) -> NodeWithScore:
@@ -168,6 +183,10 @@ async def test_fast_mode_keeps_semantic_top1_and_uses_fusion_coverage_after_it()
     assert [item.policy_id for item in response.matches] == ["P-semantic", "P-lexical"]
     assert response.matches[0].score == pytest.approx(0.86, abs=0.01)
     assert response.matches[1].score == pytest.approx(0.82, abs=0.01)
+    assert [item.ranking_stage for item in response.matches] == [
+        "fast_semantic",
+        "fast_semantic",
+    ]
 
 
 @pytest.mark.asyncio
@@ -224,6 +243,11 @@ async def test_full_mode_records_true_stage_rankings_and_preserves_fusion_covera
     ]
     assert response.matches[0].score == pytest.approx(0.92)
     assert response.matches[1].score == pytest.approx(1.0)
+    assert [item.ranking_stage for item in response.matches] == [
+        "reranker",
+        "fusion_coverage",
+        "fusion_coverage",
+    ]
     assert response.retrieval.reranker_applied is True
     assert response.retrieval.fusion_ranking[0].node_id == "fusion-primary"
     assert response.retrieval.reranked_ranking[0].node_id == "reranker-primary"

@@ -21,6 +21,7 @@
 - Week 7 起，`apps/web/src/App.vue` 采用单会话多轮消息流；每条用户消息对应一个 Agent run，trace 嵌在对应 assistant 消息下。
 - `apps/server/src/main.ts`：Fastify 路由、SSE 响应流、审批接口。
 - `apps/server/src/agent/executor.ts`：Agent 执行流程、步骤事件生成、Tool Calling 循环和审批暂停/恢复。
+- `apps/server/src/agent/policyQuery.ts`：将任务和可信工单上下文改写为面向政策语义的检索 Query；禁止把完整工单 JSON、追踪 ID、状态或优先级直接送入 RAG。
 - `apps/server/src/agent/outcome.ts`：根据 Run 终态、审批决议和真实工具轨迹派生结构化业务结论，禁止信任模型自报动作。
 - `apps/server/src/agent/businessDecision.ts`：从可信工具轨迹构造 EvidencePacket，校验模型的事实引用、动作声明与推荐，并在失败时回退确定性 Outcome。
 - `apps/server/src/agent/errors.ts`：Agent 统一错误模型，负责错误分类、用户提示、结构化错误码和 SSE error payload。

@@ -84,3 +84,33 @@ async def test_changed_document_replaces_same_policy_version(tmp_path: Path) -> 
     assert second.document_id != first.document_id
     assert second.document_id in node_store.nodes
     assert first.document_id not in node_store.nodes
+
+
+@pytest.mark.asyncio
+async def test_chunking_configuration_change_rebuilds_unchanged_source(tmp_path: Path) -> None:
+    path = tmp_path / "policy.md"
+    write_policy(path, "同一份政策正文。" * 40)
+    repository = InMemoryDocumentRepository()
+    node_store = InMemoryNodeStore()
+    first_service = IngestionService(
+        repository,
+        node_store,
+        FakeEmbeddingModel(),
+        chunk_size=128,
+        chunk_overlap=16,
+    )
+    second_service = IngestionService(
+        repository,
+        node_store,
+        FakeEmbeddingModel(),
+        chunk_size=256,
+        chunk_overlap=32,
+    )
+
+    first = await first_service.ingest_file(path)
+    second = await second_service.ingest_file(path)
+
+    assert first.status == "indexed"
+    assert second.status == "indexed"
+    assert second.document_id != first.document_id
+    assert first.document_id not in node_store.nodes

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -48,6 +49,8 @@ LEXICAL_STOP_WORDS = {
     "要求",
     "需要",
 }
+MARKDOWN_HEADING_LINE = re.compile(r"^\s{0,3}#{1,6}\s+")
+SNIPPET_BOUNDARY = re.compile(r"(?<=[。！？!?；;])|\n+")
 
 
 class AsyncCandidateSource(Protocol):
@@ -414,6 +417,39 @@ def tokenize_lexical(text: str) -> list[str]:
     )
 
 
+def extract_relevant_snippet(query: str, content: str, *, max_chars: int = 220) -> str:
+    """从审计节点中确定性提取最相关的一到两句，避免最终回答回显整段正文。"""
+    plain_lines = [
+        line.strip()
+        for line in content.splitlines()
+        if line.strip() and not MARKDOWN_HEADING_LINE.match(line)
+    ]
+    sentences = [
+        sentence.strip().lstrip("-*• ")
+        for sentence in SNIPPET_BOUNDARY.split("\n".join(plain_lines))
+        if sentence.strip()
+    ]
+    if not sentences:
+        return content.strip()[:max_chars]
+
+    query_tokens = set(tokenize_lexical(query))
+    best_text = sentences[0]
+    best_score = float("-inf")
+    for start in range(len(sentences)):
+        for width in (1, 2):
+            candidate = "".join(sentences[start : start + width]).strip()
+            if not candidate or len(candidate) > max_chars:
+                continue
+            candidate_tokens = set(tokenize_lexical(candidate))
+            overlap = len(query_tokens.intersection(candidate_tokens))
+            # 相同命中数时优先更短的证据片段，降低无关上下文进入最终回答的概率。
+            score = overlap * 10 - len(candidate) / max_chars
+            if score > best_score:
+                best_score = score
+                best_text = candidate
+    return best_text[:max_chars]
+
+
 def normalize_rerank_score(score: float | None) -> float:
     if score is None:
         return 0
@@ -462,6 +498,7 @@ class RetrievalService:
                 fused,
                 reranked,
                 request.top_k,
+                query=request.query,
             )
             rejection_threshold = self.minimum_rerank_score
         else:
@@ -469,6 +506,7 @@ class RetrievalService:
                 fused,
                 reranked,
                 request.top_k,
+                query=request.query,
             )
             rejection_threshold = self.minimum_score
         if not matches:
@@ -505,6 +543,8 @@ class RetrievalService:
     def _to_match(
         candidate: NodeWithScore,
         *,
+        query: str,
+        ranking_stage: str = "fusion_coverage",
         result_score: float | None = None,
         rerank_score: float | None = None,
     ) -> PolicyKnowledgeMatch:
@@ -516,6 +556,8 @@ class RetrievalService:
             keyword=str(metadata["keyword"]),
             title=str(metadata["title"]),
             content=candidate.node.text,
+            snippet=extract_relevant_snippet(query, candidate.node.text),
+            ranking_stage=ranking_stage,
             score=score,
             vector_score=_optional_score(metadata.get("vector_score")),
             lexical_score=_optional_score(metadata.get("lexical_score")),
@@ -536,6 +578,8 @@ class RetrievalService:
         fused: Sequence[NodeWithScore],
         reranked: Sequence[NodeWithScore],
         top_k: int,
+        *,
+        query: str,
     ) -> list[PolicyKnowledgeMatch]:
         """Reranker 决定主证据，其余位置保留高置信融合候选的政策覆盖。"""
         if not reranked:
@@ -551,6 +595,8 @@ class RetrievalService:
         candidates = [
             self._to_match(
                 primary,
+                query=query,
+                ranking_stage="reranker",
                 result_score=primary_score,
                 rerank_score=primary_score,
             )
@@ -562,6 +608,8 @@ class RetrievalService:
             candidates.append(
                 self._to_match(
                     candidate,
+                    query=query,
+                    ranking_stage="fusion_coverage",
                     result_score=fusion_score,
                     rerank_score=rerank_scores.get(candidate.node.node_id),
                 )
@@ -578,13 +626,20 @@ class RetrievalService:
         fused: Sequence[NodeWithScore],
         ranked: Sequence[NodeWithScore],
         top_k: int,
+        *,
+        query: str,
     ) -> list[PolicyKnowledgeMatch]:
         """FastFusion 保留前两条强语义证据，其余位置按融合顺序保护多政策覆盖。"""
         if not ranked:
             return []
         ranked_primary = list(ranked[: min(2, top_k)])
         candidates = [
-            self._to_match(item, result_score=normalize_rerank_score(item.score))
+            self._to_match(
+                item,
+                query=query,
+                ranking_stage="fast_semantic",
+                result_score=normalize_rerank_score(item.score),
+            )
             for item in ranked_primary
         ]
         primary_node_ids = {item.node.node_id for item in ranked_primary}
@@ -592,7 +647,14 @@ class RetrievalService:
             if candidate.node.node_id in primary_node_ids:
                 continue
             fusion_score = _optional_score(candidate.node.metadata.get("fusion_score")) or 0
-            candidates.append(self._to_match(candidate, result_score=fusion_score))
+            candidates.append(
+                self._to_match(
+                    candidate,
+                    query=query,
+                    ranking_stage="fusion_coverage",
+                    result_score=fusion_score,
+                )
+            )
         return self._deduplicate_matches(
             candidates,
             minimum_score=self.minimum_score,

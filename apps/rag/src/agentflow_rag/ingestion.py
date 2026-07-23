@@ -10,7 +10,7 @@ from typing import Protocol
 from llama_index.core.schema import BaseNode, MetadataMode
 
 from .documents import parse_policy_file
-from .nodes import build_document_ref_id, build_policy_nodes
+from .nodes import build_document_ref_id, build_index_checksum, build_policy_nodes
 from .schemas import ParsedPolicyDocument, PolicyMetadata
 
 
@@ -109,8 +109,18 @@ class IngestionService:
 
     async def ingest_file(self, path: Path, metadata: PolicyMetadata | None = None) -> IngestionResult:
         """索引单个文件"""
-        document = parse_policy_file(path, metadata)
-        # 1. 幂等检查：同一 policy_id+version 且 checksum 相同且已 indexed → 跳过
+        source_document = parse_policy_file(path, metadata)
+        # 索引指纹包含源文件、切块策略和参数，避免代码升级后继续复用旧 Node。
+        document = source_document.model_copy(
+            update={
+                "checksum": build_index_checksum(
+                    source_document.checksum,
+                    chunk_size=self.chunk_size,
+                    chunk_overlap=self.chunk_overlap,
+                )
+            }
+        )
+        # 1. 幂等检查：同一 policy_id+version 且索引指纹相同且已 indexed → 跳过
         existing = await self.repository.find_by_policy_version(
             document.metadata.policy_id, document.metadata.version
         )

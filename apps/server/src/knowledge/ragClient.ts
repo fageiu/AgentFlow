@@ -71,6 +71,11 @@ function optionalNumber(record: Record<string, unknown>, key: string) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function optionalString(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 function parseCitation(value: unknown): PolicyCitation {
   const record = asRecord(value);
   if (!record) {
@@ -96,6 +101,12 @@ function parseMatch(value: unknown): PolicyKnowledgeMatch {
     keyword: requiredString(record, "keyword"),
     title: requiredString(record, "title"),
     content: requiredString(record, "content"),
+    snippet: optionalString(record, "snippet"),
+    rankingStage: (
+      record.ranking_stage === "reranker"
+      || record.ranking_stage === "fast_semantic"
+      || record.ranking_stage === "fusion_coverage"
+    ) ? record.ranking_stage : undefined,
     score: record.score,
     vectorScore: optionalNumber(record, "vector_score"),
     lexicalScore: optionalNumber(record, "lexical_score"),
@@ -116,6 +127,9 @@ function parseRetrieval(value: unknown): KnowledgeRetrievalMetrics {
     lexicalCandidates: record.lexical_candidates as number,
     rerankedCandidates: record.reranked_candidates as number,
     durationMs: record.duration_ms as number,
+    rerankerApplied: typeof record.reranker_applied === "boolean"
+      ? record.reranker_applied
+      : undefined,
   };
 }
 
@@ -132,6 +146,7 @@ function parseSearchResult(value: unknown, requestedKeyword: string): PolicySear
     keyword: top.keyword,
     title: top.title,
     content: top.content,
+    snippet: top.snippet,
     matchedKeyword: top.keyword,
     requestedKeyword,
     score: top.score,
@@ -155,6 +170,8 @@ function fixtureResult(keyword: string): PolicySearchResult {
     keyword: policy.keyword,
     title: policy.title,
     content: policy.content,
+    snippet: policy.content,
+    rankingStage: "fixture",
     score: 1,
     fusionScore: 1,
     rerankScore: 1,
@@ -165,12 +182,19 @@ function fixtureResult(keyword: string): PolicySearchResult {
     keyword: policy.keyword,
     title: policy.title,
     content: policy.content,
+    snippet: policy.content,
     matchedKeyword: policy.matchedKeyword,
     requestedKeyword: keyword,
     score: 1,
     citation,
     matches: [match],
-    retrieval: { vectorCandidates: 1, lexicalCandidates: 1, rerankedCandidates: 1, durationMs: 0 },
+    retrieval: {
+      vectorCandidates: 1,
+      lexicalCandidates: 1,
+      rerankedCandidates: 1,
+      durationMs: 0,
+      rerankerApplied: false,
+    },
   };
 }
 

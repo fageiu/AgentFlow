@@ -311,11 +311,21 @@ export interface PolicyCitation {
 }
 
 /** 企业政策知识库返回的单个检索节点及各阶段得分。 */
+export type PolicyRankingStage =
+  | "reranker"
+  | "fast_semantic"
+  | "fusion_coverage"
+  | "fixture";
+
 export interface PolicyKnowledgeMatch {
   policyId: string;
   keyword: string;
   title: string;
+  /** 面向回答展示的 Query 相关短证据；content 仍保留完整审计节点。 */
+  snippet?: string;
   content: string;
+  /** score 所属的排序阶段；不同阶段的分数不可直接横向比较。 */
+  rankingStage?: PolicyRankingStage;
   score: number;
   vectorScore?: number;
   lexicalScore?: number;
@@ -330,12 +340,14 @@ export interface KnowledgeRetrievalMetrics {
   lexicalCandidates: number;
   rerankedCandidates: number;
   durationMs: number;
+  rerankerApplied?: boolean;
 }
 
 /** searchPolicy 的兼容输出：顶层保留旧 Policy 字段，同时暴露 Top-K 和引用。 */
 export interface PolicySearchResult extends Policy {
   matchedKeyword: string;
   requestedKeyword?: string;
+  snippet?: string;
   score: number;
   citation: PolicyCitation;
   matches: PolicyKnowledgeMatch[];
