@@ -51,6 +51,23 @@ test("Mock 模式可显式使用 Seed Policy 兼容 Fixture", async () => {
   }
 });
 
+test("Mock 政策种子与真实语料一致支持续费折扣专项规则", async () => {
+  const previousMode = process.env.RAG_MODE;
+  process.env.RAG_MODE = "fixture";
+  try {
+    const result = await searchPolicyKnowledge({
+      keyword: "renewal-discount",
+      query: "续费折扣没有按合同体现，应该如何复核？",
+    });
+    assert.equal(result.id, "P-renewal-002");
+    assert.equal(result.matches[0]?.keyword, "renewal-discount");
+    assert.equal(result.citation.version, "fixture");
+  } finally {
+    if (previousMode == null) delete process.env.RAG_MODE;
+    else process.env.RAG_MODE = previousMode;
+  }
+});
+
 test("RAG Client 映射 snake_case 响应并传递 Run ID", async () => {
   const previousMode = process.env.RAG_MODE;
   process.env.RAG_MODE = "service";

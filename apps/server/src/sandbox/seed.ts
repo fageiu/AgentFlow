@@ -276,6 +276,12 @@ function createInitialPolicies(): Policy[] {
       content: "合同升级应核对客户等级、当前订单金额和目标版本，不涉及退款时不得创建退款记录。",
     },
     {
+      id: "P-renewal-002",
+      keyword: "renewal-discount",
+      title: "企业客户续费折扣核验政策",
+      content: "续费折扣争议应核对原合同、续费报价、客户等级、承诺周期和实际订单；Agent 不得自行修改价格、创建补偿或退款。",
+    },
+    {
       id: "P-duplicate-refund-001",
       keyword: "duplicate-refund",
       title: "重复退款核查规则",

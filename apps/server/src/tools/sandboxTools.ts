@@ -158,6 +158,8 @@ export function searchPolicy(keyword: string) {
     "合同升级": "upgrade",
     "升级咨询": "upgrade",
     "升级": "upgrade",
+    "续费折扣": "renewal-discount",
+    "续费优惠": "renewal-discount",
     "订单取消": "cancel",
     "重复退款": "duplicate-refund",
     "重复退款核查": "duplicate-refund",
