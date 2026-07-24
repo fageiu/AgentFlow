@@ -9,7 +9,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 .pnpm-store/
 .logs/
 .agentflow-data/

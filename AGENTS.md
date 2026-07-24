@@ -31,6 +31,7 @@
 - `apps/server/src/llm/*`：LLM 配置、Prompt 和 Provider 封装。
 - `apps/server/src/knowledge/ragClient.ts`：企业政策 RAG 服务客户端，负责 Fixture/Service 模式隔离、超时重试、错误映射和 Citation 契约转换；真实模式禁止回退 Seed Policy。
 - `apps/rag/src/agentflow_rag/runtime.py`：生产 RAG 依赖装配，按数据库、BGE 模型、bundled 索引顺序更新 readiness。
+- `apps/rag/src/agentflow_rag/cleaning.py`：解析后、分块前的确定性文档清洗；规则必须保留页码与章节引用边界，更新规则时同步升级清洗策略版本。
 - `apps/rag/src/agentflow_rag/retrieval.py`：向量、BM25/PostgreSQL 稀疏召回、RRF 融合与重排；BM25 快照必须在文档变更成功后原子替换，并保留 `postgres` 回滚模式。
 - 同一政策版本更新正文时会生成新的校验和文档；current 选择必须优先本次成功索引的文档，unchanged 启动路径仍需校准 current 指针，禁止留下“文档已索引但节点属于非 current 行”的空召回状态。
 - `apps/web/src/components/PolicyRetrievalDetail.vue`：Trace 中的政策证据账本，展示 Top-K、检索得分和文件/版本/章节/页码引用。

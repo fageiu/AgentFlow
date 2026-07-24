@@ -1,5 +1,7 @@
 from datetime import date
 
+from llama_index.core.schema import MetadataMode
+
 from agentflow_rag.nodes import build_index_checksum, build_policy_nodes
 from agentflow_rag.schemas import ParsedPolicyDocument, PolicyMetadata, PolicyPage
 
@@ -63,4 +65,22 @@ def test_index_checksum_changes_with_chunking_parameters() -> None:
 
     assert baseline == build_index_checksum("source", chunk_size=256, chunk_overlap=32)
     assert baseline != build_index_checksum("source", chunk_size=384, chunk_overlap=32)
+    assert baseline != build_index_checksum(
+        "source",
+        chunk_size=256,
+        chunk_overlap=32,
+        cleaning_strategy="policy-text-cleaning-v2",
+    )
 
+
+def test_nodes_include_cleaning_audit_metadata() -> None:
+    document = make_document("# 政策\n\n这是带有清洗审计元数据的政策正文。")
+    document.cleaning_strategy = "policy-text-cleaning-v1"
+    document.cleaning_stats.input_pages = 1
+    document.cleaning_stats.output_pages = 1
+
+    node = build_policy_nodes(document, chunk_size=256, chunk_overlap=32)[0]
+
+    assert node.metadata["cleaning_strategy"] == "policy-text-cleaning-v1"
+    assert node.metadata["cleaning_stats"]["input_pages"] == 1
+    assert "cleaning_stats" not in node.get_content(metadata_mode=MetadataMode.EMBED)

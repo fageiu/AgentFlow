@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import BaseNode, TextNode
 
+from .cleaning import CLEANING_STRATEGY_VERSION
 from .schemas import ParsedPolicyDocument
 
 CHUNKING_STRATEGY_VERSION = "markdown-section-recursive-v1"
@@ -63,10 +64,17 @@ def _split_markdown_sections(text: str) -> list[MarkdownSection]:
     return sections or [MarkdownSection((), text.strip())]
 
 
-def build_index_checksum(source_checksum: str, *, chunk_size: int, chunk_overlap: int) -> str:
-    """将切块策略和参数纳入索引指纹，策略升级后自动重建旧节点。"""
+def build_index_checksum(
+    source_checksum: str,
+    *,
+    chunk_size: int,
+    chunk_overlap: int,
+    cleaning_strategy: str = CLEANING_STRATEGY_VERSION,
+) -> str:
+    """将清洗、切块策略和参数纳入索引指纹，策略升级后自动重建旧节点。"""
     payload = (
-        f"{source_checksum}:{CHUNKING_STRATEGY_VERSION}:{chunk_size}:{chunk_overlap}"
+        f"{source_checksum}:{cleaning_strategy}:{CHUNKING_STRATEGY_VERSION}:"
+        f"{chunk_size}:{chunk_overlap}"
     ).encode()
     return hashlib.sha256(payload).hexdigest()
 
@@ -100,11 +108,20 @@ def build_policy_nodes(
                 "section": section.section,
                 "heading_path": heading_titles,
                 "parent_id": parent_id,
+                "cleaning_strategy": document.cleaning_strategy,
+                "cleaning_stats": document.cleaning_stats.model_dump(mode="json"),
                 "chunking_strategy": CHUNKING_STRATEGY_VERSION,
             }
             # 先只按正文计算 token，再显式附加元数据，避免较长章节路径挤占切分预算。
             for chunk_text in splitter.split_text(section.text):
-                nodes.append(TextNode(text=chunk_text, metadata=dict(metadata)))
+                nodes.append(
+                    TextNode(
+                        text=chunk_text,
+                        metadata=dict(metadata),
+                        # 清洗审计统计需要持久化，但不应成为语义向量的一部分。
+                        excluded_embed_metadata_keys=["cleaning_stats"],
+                    )
+                )
 
     # Node ID 同时绑定索引指纹、顺序和正文，保证重复摄取稳定且策略升级可追踪。
     for ordinal, node in enumerate(nodes):

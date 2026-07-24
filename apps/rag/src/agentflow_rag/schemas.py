@@ -21,11 +21,26 @@ class PolicyMetadata(BaseModel):
     department: str = Field(min_length=2, max_length=200)
 
 
+class DocumentCleaningStats(BaseModel):
+    """文档清洗的可审计统计，不保存或暴露原始敏感正文。"""
+
+    input_pages: int = 0
+    output_pages: int = 0
+    removed_empty_pages: int = 0
+    removed_headers_footers: int = 0
+    removed_page_numbers: int = 0
+    removed_duplicate_paragraphs: int = 0
+    repaired_line_breaks: int = 0
+    removed_characters: int = 0
+
+
 class ParsedPolicyDocument(BaseModel):
     metadata: PolicyMetadata
     source_name: str
     checksum: str
     pages: list[PolicyPage]
+    cleaning_strategy: str | None = None
+    cleaning_stats: DocumentCleaningStats = Field(default_factory=DocumentCleaningStats)
 
 
 class PolicyPage(BaseModel):

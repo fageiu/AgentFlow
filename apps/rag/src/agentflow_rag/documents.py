@@ -10,6 +10,7 @@ import fitz
 import yaml
 from pydantic import ValidationError
 
+from .cleaning import CLEANING_STRATEGY_VERSION, clean_policy_pages
 from .errors import KnowledgeDocumentInvalidError
 from .schemas import ParsedPolicyDocument, PolicyMetadata, PolicyPage
 
@@ -41,11 +42,17 @@ def parse_markdown(path: Path) -> ParsedPolicyDocument:
     body = match.group(2).strip()
     if len(body) < 80:
         raise KnowledgeDocumentInvalidError("政策正文过短", source=path.name)
+    pages, cleaning_stats = clean_policy_pages(
+        [PolicyPage(text=body)],
+        source_format="markdown",
+    )
     return ParsedPolicyDocument(
         metadata=metadata,
         source_name=path.name,
         checksum=content_checksum(raw, metadata),
-        pages=[PolicyPage(text=body)],
+        pages=pages,
+        cleaning_strategy=CLEANING_STRATEGY_VERSION,
+        cleaning_stats=cleaning_stats,
     )
 
 
@@ -66,12 +73,17 @@ def parse_pdf(path: Path, metadata: PolicyMetadata) -> ParsedPolicyDocument:
         pdf.close()
     if not pages:
         raise KnowledgeDocumentInvalidError("PDF 没有可提取文本，首期不支持扫描件 OCR", source=path.name)
+    pages, cleaning_stats = clean_policy_pages(pages, source_format="pdf")
+    if not pages:
+        raise KnowledgeDocumentInvalidError("PDF 清洗后没有有效正文", source=path.name)
 
     return ParsedPolicyDocument(
         metadata=metadata,
         source_name=path.name,
         checksum=content_checksum(raw, metadata),
         pages=pages,
+        cleaning_strategy=CLEANING_STRATEGY_VERSION,
+        cleaning_stats=cleaning_stats,
     )
 
 

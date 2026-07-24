@@ -117,6 +117,7 @@ class IngestionService:
                     source_document.checksum,
                     chunk_size=self.chunk_size,
                     chunk_overlap=self.chunk_overlap,
+                    cleaning_strategy=source_document.cleaning_strategy or "none",
                 )
             }
         )

@@ -108,6 +108,7 @@ apps/rag/
 │   ├── stores.py            # PostgreSQL 文档仓库 + 向量/词法 Node 写入
 │   ├── nodes.py             # LlamaIndex Document → Node 转换（分块+稳定 ID）
 │   ├── documents.py         # Markdown/PDF 解析 + 校验
+│   ├── cleaning.py          # 保留引用边界的确定性正文清洗
 │   ├── admin.py             # 管理服务（上传/删除/重新索引）
 │   ├── errors.py            # 稳定错误模型 + FastAPI 异常处理器
 │   ├── health.py            # Readiness 探针
@@ -355,7 +356,11 @@ def build_policy_nodes(document, *, chunk_size=512, chunk_overlap=80):
     return nodes
 ```
 
-索引使用 `source_checksum + chunking_strategy + chunk_size + chunk_overlap` 生成指纹。源文件
+索引使用
+`source_checksum + cleaning_strategy + chunking_strategy + chunk_size + chunk_overlap`
+生成指纹。源文件、清洗规则或切块参数任一变化都会触发重建。清洗发生在解析后、分块前，
+会规范 Unicode、换行和不可见字符，保守修复 PDF 断行，并移除多页 PDF 的重复页眉页脚；
+清洗过程保留原始页码，统计信息写入 Node 元数据但不参与 Embedding。源文件
 没有变化但切块策略或参数发生变化时，会生成新文档行和新 Node，并在成功后原子切换
 `is_current`；相同策略的后续启动仍保持 `unchanged`。
 

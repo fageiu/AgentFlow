@@ -1,0 +1,10 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+
+[*.md]
+# Markdown 的行尾双空格可能表示强制换行，不在保存时自动删除。
+trim_trailing_whitespace = false

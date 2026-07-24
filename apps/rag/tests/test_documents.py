@@ -34,6 +34,9 @@ department: 测试部门
     assert document.metadata.status == "active"
     assert document.pages[0].page is None
     assert len(document.checksum) == 64
+    assert document.cleaning_strategy == "policy-text-cleaning-v1"
+    assert document.cleaning_stats.input_pages == 1
+    assert document.cleaning_stats.output_pages == 1
 
 
 def test_parse_markdown_rejects_missing_frontmatter(tmp_path: Path) -> None:
@@ -64,3 +67,4 @@ def test_parse_pdf_preserves_page_number(tmp_path: Path) -> None:
     document = parse_pdf(path, metadata)
     assert document.pages[0].page == 1
     assert "AgentFlow" in document.pages[0].text
+    assert document.cleaning_strategy == "policy-text-cleaning-v1"
