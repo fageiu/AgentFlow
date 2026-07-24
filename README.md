@@ -15,6 +15,7 @@ AgentFlow 是一个面向企业流程自动化的 AI Agent Runtime 与 Evaluatio
 - **业务语义约束**：单工单任务会预读取真实上下文，规则检索依据工单标题和描述归一到退款、审批、发票、SLA、升级、取消、重复退款或安全规则；Planner 输出发生格式波动时，仅在已有可信单工单上下文的前提下回退到固定只读核查计划，不扩大写权限。
 - **模型层解耦**：统一封装 OpenAI-compatible Provider，支持兼容模型切换和 Mock fallback，便于本地演示与稳定回归。
 - **企业政策 RAG**：独立 FastAPI + LlamaIndex 服务使用 BGE-M3、BM25、BGE Reranker 与 pgvector，`searchPolicy` 返回 Top-K、分阶段得分和可验证 Citation；当前 50 条 Golden Query 的 Fast/CPU 热态评测达到 Recall@5 100%、MRR 0.841、无答案拒答准确率 100%，P95 为 1.353 秒。
+- **可解释排序口径**：政策 Match 显式标记 `reranker`、`fast_semantic` 或 `fusion_coverage`，界面不再把不同算法产生的分数当成同一尺度比较；旧 Trace 统一显示为“历史综合分”。
 
 完整设计见 [Agent 执行架构](docs/architecture.md)。
 
@@ -61,6 +62,7 @@ docs/
   -> Planner 生成并校验结构化执行计划（步骤、工具授权、审批要求）
   -> Executor 只接受当前计划步骤授权的一项 tool_call
   -> 后端通过 Tool Registry 校验并执行工具；searchPolicy 异步调用 RAG 并返回 Citation
+  -> policyQuery 将工单标题和描述改写为独立政策问题，追踪 ID、状态和完整 JSON 不进入检索正文
   -> 工具失败时将观察结果交给 Replanner，只重规划尚未完成的步骤
   -> 高风险工具进入 approval_required，前端展示批准/拒绝按钮
   -> 审批结果通过 approval_resolved 回到同一条执行流
@@ -106,14 +108,19 @@ docs/
 
 ```txt
 Markdown / PDF
-  -> SentenceSplitter(512 / overlap 80)
+  -> Markdown 标题/页面强边界
+  -> 超长章节 SentenceSplitter(最大 512 tokens / overlap 80)
   -> BGE-M3 1024 维向量 + pgvector
-  -> jieba 中文分词 + PostgreSQL FTS
+  -> jieba 中文分词 + BM25（PostgreSQL FTS 可回滚）
   -> 向量 Top20 + 关键词 Top20
   -> RRF(k=60) 融合前 10
   -> BGE Reranker
-  -> 阈值 0.35 拒答或返回 Top5 Citation
+  -> 阈值拒答或返回 Top5 Citation + Query 相关短证据
 ```
+
+Markdown 按标题层级建立强章节边界，短章节保持原始长度，只有超长章节才递归切分；
+完整 Node 保留在 Trace 中用于审计，最终处理结论优先显示 Query 相关的 `snippet`。
+切块策略版本和参数会进入索引指纹，升级策略后 bundled 文档会自动重建一次。
 
 搜索示例：
 

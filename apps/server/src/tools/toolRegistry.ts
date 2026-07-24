@@ -120,7 +120,7 @@ const jsonSchemas = {
     properties: {
       keyword: {
         type: "string",
-        description: "规则关键词，必须依据工单诉求选择：refund、approval、发票、cancel、sla、upgrade、duplicate-refund 或 security。",
+        description: "规则关键词，必须依据工单诉求选择：refund、approval、发票、cancel、sla、upgrade、renewal-discount、duplicate-refund 或 security。",
       },
       query: {
         type: "string",

@@ -13,6 +13,8 @@ function servicePayload() {
         keyword: "refund",
         title: "企业退款审批政策",
         content: "高金额退款必须经过人工审批。",
+        snippet: "高金额退款必须经过人工审批。",
+        ranking_stage: "reranker",
         score: 0.91,
         fusion_score: 0.72,
         rerank_score: 0.91,
@@ -30,6 +32,7 @@ function servicePayload() {
       lexical_candidates: 12,
       reranked_candidates: 10,
       duration_ms: 86,
+      reranker_applied: true,
     },
   };
 }
@@ -66,8 +69,12 @@ test("RAG Client 映射 snake_case 响应并传递 Run ID", async () => {
     );
     assert.equal(receivedRunId, "run-rag-1");
     assert.equal(result.id, "POL-REFUND-001");
+    assert.equal(result.snippet, "高金额退款必须经过人工审批。");
+    assert.equal(result.matches[0]?.snippet, "高金额退款必须经过人工审批。");
+    assert.equal(result.matches[0]?.rankingStage, "reranker");
     assert.equal(result.citation.sourceName, "refund-policy.md");
     assert.equal(result.retrieval.vectorCandidates, 20);
+    assert.equal(result.retrieval.rerankerApplied, true);
   } finally {
     globalThis.fetch = originalFetch;
     if (previousMode == null) delete process.env.RAG_MODE;

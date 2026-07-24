@@ -71,6 +71,23 @@ function textField(value: Record<string, unknown> | undefined, key: string) {
   return typeof field === "string" || typeof field === "number" ? String(field) : undefined;
 }
 
+/** 兼容旧 Trace：缺少 snippet 时只提取正文前两句，禁止把整篇政策拼进固定结论。 */
+function compactPolicyContent(content: string | undefined, maxLength = 220) {
+  if (!content) return undefined;
+  const sentences = content
+    .split(/\r?\n|(?<=[。！？!?；;])/)
+    .map((item) => item.trim())
+    .filter((item) => item && !/^#{1,6}\s+/.test(item));
+  const selected: string[] = [];
+  for (const sentence of sentences) {
+    const next = `${selected.join("")}${sentence}`;
+    if (next.length > maxLength && selected.length > 0) break;
+    selected.push(sentence);
+    if (selected.length >= 2 || next.length >= maxLength) break;
+  }
+  return selected.join("").slice(0, maxLength) || undefined;
+}
+
 /** 将可信工具输出归一成前端固定四栏，查询结果与“是否写入”保持职责分离。 */
 function deriveConclusion(run: AgentRun, decision: AgentOutcome["decision"], performedActions: string[]) {
   const ticket = asRecord(getToolOutput(run, "updateTicketStatus")) ?? asRecord(getToolOutput(run, "getTicket"));
@@ -85,6 +102,7 @@ function deriveConclusion(run: AgentRun, decision: AgentOutcome["decision"], per
   const policyId = textField(policy, "id");
   const policyTitle = textField(policy, "title");
   const policyContent = textField(policy, "content");
+  const policySnippet = textField(policy, "snippet") ?? compactPolicyContent(policyContent);
   const policyKeyword = textField(policy, "keyword");
   const citation = asRecord(policy?.citation);
   const citationParts = [
@@ -125,7 +143,7 @@ function deriveConclusion(run: AgentRun, decision: AgentOutcome["decision"], per
   } else if (decision === "cancelled") {
     result = "任务已取消，Agent 已停止后续处理。";
   } else if (policyId || policyContent) {
-    result = `查询完成，命中规则 ${policyId ?? ""}${policyTitle ? `（${policyTitle}）` : ""}${policyContent ? `：${policyContent}` : ""}；未执行业务写入。`;
+    result = `查询完成，命中规则 ${policyId ?? ""}${policyTitle ? `（${policyTitle}）` : ""}${policySnippet ? `：${policySnippet}` : ""}；未执行业务写入。`;
   } else {
     result = `查询完成${ticketId ? `，工单 ${ticketId} 当前状态为 ${ticketStatus ?? "未知"}` : ""}；未执行业务写入。`;
   }

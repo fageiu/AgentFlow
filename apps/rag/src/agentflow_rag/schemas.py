@@ -59,6 +59,10 @@ class PolicyKnowledgeMatch(BaseModel):
     keyword: str
     title: str
     content: str
+    snippet: str | None = None
+    ranking_stage: Literal["reranker", "fast_semantic", "fusion_coverage"] = (
+        "fusion_coverage"
+    )
     score: float
     vector_score: float | None = None
     lexical_score: float | None = None
